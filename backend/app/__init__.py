@@ -1,2 +1,1 @@
-# App initialization
-__version__ = "1.0.0"
+"""NoteBrew — AI-powered research paper to Jupyter notebook conversion."""

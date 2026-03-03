@@ -5,8 +5,8 @@ import './globals.css'
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-  title: 'Paper2Notebook | Research Papers to Jupyter Notebooks',
-  description: 'Transform research papers into executable Jupyter notebooks powered by AI',
+  title: 'NoteBrew | AI-Powered Paper to Notebook Conversion',
+  description: 'AI agent that brews research papers into executable Jupyter notebooks. Powered by Gemini 3 Flash & Docling.',
 }
 
 export default function RootLayout({

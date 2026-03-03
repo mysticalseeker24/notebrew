@@ -1,33 +1,48 @@
+"""NoteBrew API — FastAPI application with AI agent-powered paper-to-notebook conversion."""
+
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from fastapi.staticfiles import StaticFiles
-import arxiv
 import uuid
-import os
+import logging
 from pathlib import Path
 import shutil
 from typing import Optional
 
 from app.config import settings
 from app.models import (
-    ArxivRequest, NotebookResponse, ProcessingStatus, 
-    ProgressUpdate, PaperMetadata
+    ArxivRequest,
+    NotebookResponse,
+    ProcessingStatus,
+    ProgressUpdate,
+    AgentState,
 )
-from app.pdf_parser import PDFParser
-from app.code_generator import CodeGenerator
-from app.notebook_generator import NotebookGenerator
+from app.agent.orchestrator import AgentOrchestrator
+from app.agent.tool_registry import ToolRegistry
+from app.agent.tools import parse_pdf, parse_arxiv, plan_notebook
+from app.agent.tools import generate_code, validate_code, assemble_notebook
 
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(name)s | %(levelname)s | %(message)s",
+)
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# FastAPI App
+# ---------------------------------------------------------------------------
 app = FastAPI(
-    title="Paper2Notebook API",
-    description="Convert research papers to runnable Jupyter notebooks",
-    version="1.0.0"
+    title="NoteBrew API",
+    description="AI agent that converts research papers into executable Jupyter notebooks",
+    version="2.0.0",
 )
 
-# CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure for production
+    allow_origins=["*"],  # Restrict in production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -37,216 +52,246 @@ app.add_middleware(
 Path(settings.UPLOAD_DIR).mkdir(exist_ok=True)
 Path(settings.OUTPUT_DIR).mkdir(exist_ok=True)
 
-# Task storage (use Redis/database in production)
-tasks = {}
+# Task storage (use Redis / database in production)
+tasks: dict[str, dict] = {}
+
+
+# ---------------------------------------------------------------------------
+# Tool Registry Setup
+# ---------------------------------------------------------------------------
+
+def _build_tool_registry() -> ToolRegistry:
+    """Create and populate the tool registry with all agent tools."""
+    registry = ToolRegistry()
+
+    registry.register(
+        name="parse_pdf",
+        description=parse_pdf.TOOL_SCHEMA["description"],
+        parameters=parse_pdf.TOOL_SCHEMA["parameters"],
+        handler=parse_pdf.parse_pdf,
+    )
+    registry.register(
+        name="parse_arxiv",
+        description=parse_arxiv.TOOL_SCHEMA["description"],
+        parameters=parse_arxiv.TOOL_SCHEMA["parameters"],
+        handler=parse_arxiv.parse_arxiv_paper,
+    )
+    registry.register(
+        name="plan_notebook",
+        description=plan_notebook.TOOL_SCHEMA["description"],
+        parameters=plan_notebook.TOOL_SCHEMA["parameters"],
+        handler=plan_notebook.plan_notebook,
+    )
+    registry.register(
+        name="generate_code",
+        description=generate_code.TOOL_SCHEMA["description"],
+        parameters=generate_code.TOOL_SCHEMA["parameters"],
+        handler=generate_code.generate_code,
+    )
+    registry.register(
+        name="validate_code",
+        description=validate_code.TOOL_SCHEMA["description"],
+        parameters=validate_code.TOOL_SCHEMA["parameters"],
+        handler=validate_code.validate_code,
+    )
+    registry.register(
+        name="assemble_notebook",
+        description=assemble_notebook.TOOL_SCHEMA["description"],
+        parameters=assemble_notebook.TOOL_SCHEMA["parameters"],
+        handler=assemble_notebook.assemble_notebook,
+    )
+
+    return registry
+
+
+tool_registry = _build_tool_registry()
+
+
+# ---------------------------------------------------------------------------
+# Routes
+# ---------------------------------------------------------------------------
 
 @app.get("/")
 async def root():
     return {
-        "message": "Paper2Notebook API",
-        "version": "1.0.0",
-        "docs": "/docs"
+        "name": "NoteBrew API",
+        "version": "2.0.0",
+        "description": "AI agent that converts research papers into Jupyter notebooks",
+        "docs": "/docs",
     }
+
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy"}
+    return {"status": "healthy", "agent_tools": tool_registry.tool_names}
+
 
 @app.post("/api/upload-pdf", response_model=NotebookResponse)
 async def upload_pdf(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
-    model: Optional[str] = None
+    model: Optional[str] = None,
 ):
-    """Upload a PDF paper and convert to notebook"""
-    
-    # Validate file
-    if not file.filename.endswith('.pdf'):
+    """Upload a PDF paper and convert to notebook using the AI agent."""
+
+    if not file.filename or not file.filename.endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are supported")
-    
-    # Create task
+
     task_id = str(uuid.uuid4())
     file_path = Path(settings.UPLOAD_DIR) / f"{task_id}.pdf"
-    
-    # Save uploaded file
+
     try:
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
-    
-    # Initialize task
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to save file: {exc}")
+
     tasks[task_id] = {
         "status": ProcessingStatus.PENDING,
         "progress": 0,
-        "message": "Processing started"
+        "message": "Processing started",
     }
-    
-    # Process in background
+
     background_tasks.add_task(
-        process_paper,
+        _run_agent,
         task_id=task_id,
-        pdf_path=str(file_path),
-        model=model
+        task_description=(
+            f"Parse the PDF at '{file_path}' using the parse_pdf tool, then "
+            f"plan and generate a Jupyter notebook from it."
+        ),
+        model=model,
     )
-    
-    return NotebookResponse(
-        task_id=task_id,
-        status=ProcessingStatus.PENDING,
-    )
+
+    return NotebookResponse(task_id=task_id, status=ProcessingStatus.PENDING)
+
 
 @app.post("/api/arxiv", response_model=NotebookResponse)
 async def process_arxiv(
     request: ArxivRequest,
-    background_tasks: BackgroundTasks
+    background_tasks: BackgroundTasks,
 ):
-    """Process a paper from arXiv URL or ID"""
-    
+    """Process a paper from arXiv URL using the AI agent."""
+
     task_id = str(uuid.uuid4())
-    
-    # Initialize task
+
     tasks[task_id] = {
         "status": ProcessingStatus.PENDING,
         "progress": 0,
-        "message": "Downloading from arXiv"
+        "message": "Downloading from arXiv",
     }
-    
-    # Process in background
+
     background_tasks.add_task(
-        process_arxiv_paper,
+        _run_agent,
         task_id=task_id,
-        arxiv_url=request.arxiv_url,
-        model=request.model
+        task_description=(
+            f"Download and parse the arXiv paper at '{request.arxiv_url}' using "
+            f"the parse_arxiv tool, then plan and generate a Jupyter notebook."
+        ),
+        model=request.model,
     )
-    
-    return NotebookResponse(
-        task_id=task_id,
-        status=ProcessingStatus.PENDING,
-    )
+
+    return NotebookResponse(task_id=task_id, status=ProcessingStatus.PENDING)
+
 
 @app.get("/api/status/{task_id}", response_model=ProgressUpdate)
 async def get_status(task_id: str):
-    """Get processing status for a task"""
-    
+    """Get processing status for a task."""
+
     if task_id not in tasks:
         raise HTTPException(status_code=404, detail="Task not found")
-    
+
     task = tasks[task_id]
-    
     return ProgressUpdate(
         task_id=task_id,
         status=task["status"],
         progress=task["progress"],
         message=task["message"],
-        current_section=task.get("current_section")
+        current_tool=task.get("current_tool"),
     )
+
 
 @app.get("/api/download/{task_id}")
 async def download_notebook(task_id: str):
-    """Download generated notebook"""
-    
+    """Download generated notebook."""
+
     if task_id not in tasks:
         raise HTTPException(status_code=404, detail="Task not found")
-    
+
     task = tasks[task_id]
-    
     if task["status"] != ProcessingStatus.COMPLETED:
         raise HTTPException(status_code=400, detail="Task not completed yet")
-    
+
     notebook_path = task.get("notebook_path")
-    
     if not notebook_path or not Path(notebook_path).exists():
         raise HTTPException(status_code=404, detail="Notebook file not found")
-    
+
     return FileResponse(
         path=notebook_path,
-        filename=f"paper_notebook_{task_id}.ipynb",
-        media_type="application/x-ipynb+json"
+        filename=f"notebrew_{task_id}.ipynb",
+        media_type="application/x-ipynb+json",
     )
 
-async def process_arxiv_paper(task_id: str, arxiv_url: str, model: Optional[str]):
-    """Download and process arXiv paper"""
-    
-    try:
-        # Update status
-        update_task(task_id, ProcessingStatus.PARSING_PDF, 10, "Downloading from arXiv")
-        
-        # Extract arXiv ID
-        arxiv_id = arxiv_url.split('/')[-1].replace('.pdf', '')
-        
-        # Download paper
-        search = arxiv.Search(id_list=[arxiv_id])
-        paper = next(search.results())
-        
-        # Download PDF
-        pdf_path = Path(settings.UPLOAD_DIR) / f"{task_id}.pdf"
-        paper.download_pdf(filename=str(pdf_path))
-        
-        # Process the PDF
-        await process_paper(task_id, str(pdf_path), model)
-        
-    except Exception as e:
-        update_task(task_id, ProcessingStatus.FAILED, 0, f"Error: {str(e)}")
-        raise
 
-async def process_paper(task_id: str, pdf_path: str, model: Optional[str]):
-    """Main paper processing pipeline"""
-    
-    try:
-        # 1. Parse PDF
-        update_task(task_id, ProcessingStatus.PARSING_PDF, 20, "Parsing PDF structure")
-        
-        parser = PDFParser(pdf_path)
-        paper_structure = parser.get_complete_structure()
-        
-        # 2. Extract LaTeX
-        update_task(task_id, ProcessingStatus.EXTRACTING_LATEX, 40, "Extracting equations")
-        
-        # Already done in get_complete_structure()
-        
-        # 3. Generate Code
-        update_task(task_id, ProcessingStatus.GENERATING_CODE, 60, "Generating PyTorch code")
-        
-        code_gen = CodeGenerator(model=model)
-        notebook_data = code_gen.generate_complete_notebook(paper_structure)
-        
-        # 4. Create Notebook
-        update_task(task_id, ProcessingStatus.CREATING_NOTEBOOK, 80, "Creating Jupyter notebook")
-        
-        nb_gen = NotebookGenerator()
-        notebook = nb_gen.generate_from_paper_data(notebook_data)
-        
-        # Save notebook
-        output_path = Path(settings.OUTPUT_DIR) / f"{task_id}.ipynb"
-        nb_gen.save(str(output_path))
-        
-        # 5. Complete
-        tasks[task_id].update({
-            "status": ProcessingStatus.COMPLETED,
-            "progress": 100,
-            "message": "Notebook generated successfully",
-            "notebook_path": str(output_path),
-            "metadata": paper_structure['metadata']
-        })
-        
-    except Exception as e:
-        update_task(task_id, ProcessingStatus.FAILED, 0, f"Error: {str(e)}")
-        raise
+# ---------------------------------------------------------------------------
+# Agent Execution
+# ---------------------------------------------------------------------------
 
-def update_task(task_id: str, status: ProcessingStatus, progress: float, message: str):
-    """Update task status"""
-    if task_id in tasks:
+async def _run_agent(task_id: str, task_description: str, model: Optional[str]):
+    """Run the AI agent to process a paper and generate a notebook."""
+
+    def on_progress(status: str, progress: float, message: str):
+        tasks[task_id].update(
+            {"status": status, "progress": progress, "message": message}
+        )
+
+    try:
+        orchestrator = AgentOrchestrator(
+            tool_registry=tool_registry,
+            model=model,
+            on_progress=on_progress,
+        )
+
+        state = AgentState(task_id=task_id)
+        final_state = await orchestrator.run(task_description, state)
+
+        if final_state.status == ProcessingStatus.COMPLETED and final_state.notebook_path:
+            tasks[task_id].update({
+                "status": ProcessingStatus.COMPLETED,
+                "progress": 100,
+                "message": "Notebook generated successfully",
+                "notebook_path": final_state.notebook_path,
+                "metadata": (
+                    final_state.paper_structure.metadata.model_dump()
+                    if final_state.paper_structure
+                    else {}
+                ),
+            })
+        else:
+            tasks[task_id].update({
+                "status": ProcessingStatus.FAILED,
+                "progress": 0,
+                "message": final_state.error or "Agent failed to complete",
+            })
+
+    except Exception as exc:
+        logger.exception("Agent execution failed for task %s", task_id)
         tasks[task_id].update({
-            "status": status,
-            "progress": progress,
-            "message": message
+            "status": ProcessingStatus.FAILED,
+            "progress": 0,
+            "message": f"Error: {exc}",
         })
+
+
+# ---------------------------------------------------------------------------
+# Entry Point
+# ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(
         "app.main:app",
         host=settings.HOST,
         port=settings.PORT,
-        reload=settings.DEBUG
+        reload=settings.DEBUG,
     )

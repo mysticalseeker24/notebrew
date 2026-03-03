@@ -1,34 +1,42 @@
-# Paper2Notebook 📄→📓
+# NoteBrew ☕📓
 
-Transform research papers into executable Jupyter notebooks in seconds. Powered by Gemini 3 Flash Preview & MiniMax M2.5.
+**AI agent that brews research papers into executable Jupyter notebooks.**
 
-![Version](https://img.shields.io/badge/version-1.0.0-blue)
+NoteBrew uses a custom AI agent with tool-calling to intelligently parse research papers, plan notebook structure, generate PyTorch code, validate it, and assemble production-quality Jupyter notebooks.
+
+![Version](https://img.shields.io/badge/version-2.0.0-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
+![Python](https://img.shields.io/badge/python-3.11+-blue)
+![Node](https://img.shields.io/badge/node-18+-green)
+
+---
 
 ## 🚀 Features
 
-- **📄 PDF to Notebook Conversion**: Upload research papers and get runnable PyTorch notebooks
-- **🔗 arXiv Integration**: Direct support for arXiv papers - just paste the URL
-- **📐 LaTeX Extraction**: Automatically extracts and renders mathematical equations
-- **🐍 PyTorch Implementation**: Real ML implementations at reduced scale for CPU execution
-- **☁️ Google Colab Ready**: One-click "Open in Colab" functionality
-- **🔧 Auto Dependencies**: Automatically detects and installs required libraries
-- **🎯 Structured Output**: Organized into Abstract, Methodology, Experiments, and Conclusion sections
+- **🤖 AI Agent Architecture** — Custom tool-calling agent that intelligently decides how to process each paper
+- **📄 Docling PDF Parser** — IBM's deep learning document parser for accurate extraction of text, equations, tables, and figures
+- **🐍 PyTorch Code Generation** — Real ML implementations scaled for CPU execution
+- **✅ Code Validation** — Validates generated code for syntax errors before assembly
+- **🔗 arXiv Integration** — Direct support for arXiv papers via URL
+- **📐 LaTeX Rendering** — Extracts and renders mathematical equations
+- **☁️ Colab Ready** — One-click "Open in Colab" functionality
+- **🔧 Extensible** — Easy to add new agent tools
 
 ## 🛠️ Tech Stack
 
 ### Backend
-- **FastAPI**: High-performance Python web framework
-- **Gemini 3 Flash Preview**: Frontier intelligence at speed (1M context window)
-- **MiniMax M2.5**: Cost-effective agentic coding model
-- **PyMuPDF**: PDF processing and text extraction
-- **nbformat**: Jupyter notebook generation
+- **FastAPI** — High-performance Python web framework
+- **Docling** (IBM) — Deep learning PDF document parser
+- **Custom AI Agent** — Tool-calling loop with no framework dependency
+- **Gemini 3 Flash Preview** — Frontier intelligence (1M context window)
+- **MiniMax M2.5** — Cost-effective fallback model
+- **OpenRouter** — Unified LLM API access
+- **nbformat** — Jupyter notebook generation
 
 ### Frontend
-- **Next.js 14**: React framework with App Router
-- **TypeScript**: Type-safe development
-- **Tailwind CSS**: Utility-first styling
-- **Framer Motion**: Smooth animations
+- **Next.js 14** — React framework with App Router
+- **TypeScript** — Type-safe development
+- **Tailwind CSS** — Utility-first styling
 
 ## 📋 Prerequisites
 
@@ -39,18 +47,20 @@ Transform research papers into executable Jupyter notebooks in seconds. Powered 
 ## 🚀 Quick Start
 
 ### 1. Clone the Repository
+
 ```bash
-git clone https://github.com/YOUR_USERNAME/Paper2Notebook.git
-cd Paper2Notebook
+git clone https://github.com/mysticalseeker24/notebrew.git
+cd notebrew
 ```
 
 ### 2. Backend Setup
+
 ```bash
 cd backend
 
 # Create virtual environment
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+source venv/bin/activate  # Windows: venv\Scripts\activate
 
 # Install dependencies
 pip install -r requirements.txt
@@ -63,9 +73,10 @@ cp .env.example .env
 python -m app.main
 ```
 
-Backend will be running at `http://localhost:8000`
+Backend runs at `http://localhost:8000` (API docs: `http://localhost:8000/docs`)
 
 ### 3. Frontend Setup
+
 ```bash
 cd frontend
 
@@ -76,68 +87,77 @@ npm install
 npm run dev
 ```
 
-Frontend will be running at `http://localhost:3000`
+Frontend runs at `http://localhost:3000`
 
-## 🐳 Docker Deployment
+## 🤖 How It Works
 
-```bash
-docker-compose up -d
+NoteBrew uses a custom AI agent with tool-calling to process papers:
+
+```
+1. Upload PDF / arXiv URL
+   ↓
+2. Agent calls parse_pdf tool (Docling)
+   → Extracts text, sections, equations, tables
+   ↓
+3. Agent calls plan_notebook tool
+   → Decides what to implement and how
+   ↓
+4. Agent calls generate_code tool (per cell)
+   → Generates PyTorch code with context
+   ↓
+5. Agent calls validate_code tool
+   → Checks for syntax errors, retries if needed
+   ↓
+6. Agent calls assemble_notebook tool
+   → Creates structured .ipynb file
+   ↓
+7. Download notebook
 ```
 
-Access at `http://localhost:3000`
+### Agent Tools
 
-## 📖 Usage
-
-### Upload PDF
-1. Click on "Upload PDF" tab
-2. Drag and drop your research paper
-3. Click "Generate Notebook"
-4. Wait for processing (20-60 seconds)
-5. Download the generated notebook
-
-### arXiv Integration
-1. Click on "arXiv URL" tab
-2. Paste arXiv URL (e.g., `https://arxiv.org/abs/2301.00001`)
-3. Click "Generate Notebook"
-4. Download when ready
-
-## 🎯 Model Selection
-
-The tool uses two powerful models:
-
-1. **Gemini 3 Flash Preview** (Primary)
-   - 1M token context window
-   - Frontier-level reasoning
-   - Excellent for complex papers
-
-2. **MiniMax M2.5** (Fallback)
-   - 100 tokens/second speed
-   - Extremely cost-effective
-   - Great for simpler papers
+| Tool | What It Does |
+|------|-------------|
+| `parse_pdf` | Parse a PDF with Docling (text, equations, tables, figures) |
+| `parse_arxiv` | Download from arXiv and parse |
+| `plan_notebook` | Plan notebook structure based on paper content |
+| `generate_code` | Generate Python/markdown cell content |
+| `validate_code` | Validate code syntax and imports |
+| `assemble_notebook` | Build the final .ipynb file |
 
 ## 📁 Project Structure
 
 ```
-Paper2Notebook/
+notebrew/
 ├── backend/
 │   ├── app/
-│   │   ├── main.py              # FastAPI application
-│   │   ├── config.py            # Configuration
-│   │   ├── models.py            # Pydantic models
-│   │   ├── pdf_parser.py        # PDF parsing logic
-│   │   ├── code_generator.py    # LLM code generation
-│   │   └── notebook_generator.py # Jupyter notebook creation
+│   │   ├── main.py                  # FastAPI entry point
+│   │   ├── config.py                # Settings & environment
+│   │   ├── models.py                # Pydantic data models
+│   │   └── agent/
+│   │       ├── orchestrator.py      # Agent loop (tool-calling)
+│   │       ├── tool_registry.py     # Tool management
+│   │       ├── tools/
+│   │       │   ├── parse_pdf.py     # Docling PDF parser
+│   │       │   ├── parse_arxiv.py   # arXiv downloader
+│   │       │   ├── plan_notebook.py # Notebook planner
+│   │       │   ├── generate_code.py # Code generator
+│   │       │   ├── validate_code.py # Code validator
+│   │       │   └── assemble_notebook.py # Notebook assembler
+│   │       └── prompts/
+│   │           ├── system.py        # Agent system prompt
+│   │           └── templates.py     # Prompt templates
 │   ├── requirements.txt
-│   └── Dockerfile
+│   └── .env.example
 ├── frontend/
 │   ├── src/
-│   │   ├── app/                 # Next.js app directory
-│   │   ├── components/          # React components
-│   │   └── lib/                 # API client
-│   ├── package.json
-│   └── tailwind.config.ts
-├── docker-compose.yml
-└── README.md
+│   │   ├── app/                     # Next.js pages
+│   │   └── lib/                     # API client
+│   └── package.json
+├── CODING_CONVENTIONS.md
+├── CONTRIBUTING.md
+├── README.md
+└── LICENSE
 ```
 
 ## 🔧 Configuration
@@ -148,49 +168,43 @@ Paper2Notebook/
 # OpenRouter API
 OPENROUTER_API_KEY=your_key_here
 
-# Model Configuration
+# Models
 PRIMARY_MODEL=gemini-3-flash-preview
 FALLBACK_MODEL=minimax-m2.5
 
-# Server
-HOST=0.0.0.0
-PORT=8000
-DEBUG=False
+# Agent
+AGENT_MAX_ITERATIONS=15
+AGENT_MAX_RETRIES=3
 
-# Limits
-MAX_FILE_SIZE_MB=50
-NOTEBOOK_TIMEOUT=300
+# Docling
+DOCLING_OCR_ENABLED=True
+DOCLING_EXTRACT_TABLES=True
 ```
+
+See [`.env.example`](backend/.env.example) for all options.
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
 
 1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Follow [CODING_CONVENTIONS.md](CODING_CONVENTIONS.md)
+4. Submit a Pull Request
 
 ## 📝 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License — see [LICENSE](LICENSE) for details.
 
 ## 🙏 Acknowledgments
 
+- [Docling](https://github.com/DS4SD/docling) by IBM Research — Document parsing
 - [Gemini 3 Flash Preview](https://deepmind.google/models/gemini/flash/) by Google DeepMind
 - [MiniMax M2.5](https://www.minimax.io/news/minimax-m25) by MiniMax AI
-- [OpenRouter](https://openrouter.ai) for unified LLM API access
-- [PyMuPDF](https://pymupdf.readthedocs.io/) for PDF processing
-- [FastAPI](https://fastapi.tiangolo.com/) for the backend framework
-- [Next.js](https://nextjs.org/) for the frontend framework
-
-## 📧 Contact
-
-Your Name - [@yourusername](https://twitter.com/yourusername)
-
-Project Link: [https://github.com/yourusername/Paper2Notebook](https://github.com/yourusername/Paper2Notebook)
+- [OpenRouter](https://openrouter.ai) — Unified LLM API access
+- [FastAPI](https://fastapi.tiangolo.com/) — Backend framework
+- [Next.js](https://nextjs.org/) — Frontend framework
 
 ---
 
-**Built with ❤️ for the research community**
+**Built with ❤️ by [Saksham Mishra](https://github.com/mysticalseeker24) for the research community**
