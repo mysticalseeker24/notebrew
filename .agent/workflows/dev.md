@@ -51,7 +51,7 @@ Server runs at `http://localhost:8001` (API docs at `/docs`)
   ```
   Remove-Item Env:OPENROUTER_API_KEY -ErrorAction SilentlyContinue
   ```
-- **Pydantic warnings**: Docling's `model_spec` warnings are cosmetic (from Docling's own models, not ours)
+- **Pydantic config**: Old `.env` files with `DOCLING_*` vars are safely ignored (`extra="ignore"` in settings)
 - **Debug mode**: Set `DEBUG=True` in `.env` for auto-reload
 
 ## Quick Test

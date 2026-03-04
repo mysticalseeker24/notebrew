@@ -2,6 +2,12 @@
 
 Primary:  Gemini 3 Flash Vision via OpenRouter (state-of-the-art, no local GPU).
 Fallback: PyMuPDF4LLM (offline, lightweight, heuristic-based).
+
+Hybrid strategy (Approach B):
+  - Gemini Vision extracts STRUCTURED data: metadata, sections, equations
+    (LaTeX), tables (markdown), figures (captions/descriptions), references.
+  - PyMuPDF4LLM extracts the RAW full_text (fast, free, no token cost).
+  - This avoids JSON truncation from asking Gemini to reproduce the full paper.
 """
 
 from __future__ import annotations
@@ -42,39 +48,51 @@ TOOL_SCHEMA = {
 }
 
 # ---------------------------------------------------------------------------
-# Extraction prompt for Gemini Vision
+# Extraction prompt for Gemini Vision (structured data only — NO full_text)
 # ---------------------------------------------------------------------------
-EXTRACTION_PROMPT = """You are a research paper parser. Analyze this PDF document and extract its complete structure.
+EXTRACTION_PROMPT = """\
+You are an expert research paper parser. Analyze this PDF and extract its \
+complete structure as JSON.
 
 Return a JSON object with EXACTLY this schema (no markdown fences, pure JSON):
 
 {
   "metadata": {
-    "title": "Paper title",
+    "title": "Full paper title",
     "authors": ["Author 1", "Author 2"],
     "abstract": "Full abstract text",
-    "num_pages": 0
+    "num_pages": 0,
+    "published_date": "YYYY or YYYY-MM if visible",
+    "doi": "DOI if visible, else null"
   },
   "sections": [
     {
-      "title": "Section title (e.g., Introduction, Methodology)",
-      "content": "Full section text content in markdown format",
-      "equations": ["LaTeX equation strings found in this section, e.g., E = mc^2"],
-      "tables": [{"caption": "Table caption", "content": "Table in markdown format"}],
-      "figures": [{"caption": "Figure caption", "description": "Brief description"}]
+      "title": "Section title (e.g., 1. Introduction)",
+      "content_summary": "Brief 1-2 sentence summary of the section content",
+      "equations": ["LaTeX string, e.g. E = mc^2"],
+      "tables": [{"caption": "Table 1: ...", "content": "| col1 | col2 |\\n|---|---|\\n| ... |"}],
+      "figures": [{"caption": "Figure 1: ...", "description": "Visual description of what the figure shows"}],
+      "key_findings": ["Important result or claim from this section"]
     }
   ],
-  "equations": ["All LaTeX equations found in the paper, each as a separate string"],
-  "full_text": "Complete paper content as clean markdown, preserving structure with ## headers for sections"
+  "equations": ["Every LaTeX equation in the paper as a separate string"],
+  "references": [
+    {"id": "[1]", "text": "Author et al. Title. Journal, Year."}
+  ],
+  "key_contributions": ["Main contribution 1", "Main contribution 2"]
 }
 
 Rules:
-- Extract ALL sections, including Abstract, Introduction, Related Work, Methodology, Experiments, Results, Conclusion, References, etc.
-- Convert ALL mathematical equations to LaTeX notation (e.g., \\nabla, \\sum, \\int, etc.)
+- Extract ALL sections: Abstract, Introduction, Related Work, Methodology, \
+Experiments, Results, Discussion, Conclusion, Appendix, etc.
+- Convert ALL math to LaTeX (\\nabla, \\sum, \\int, \\frac{}{}, etc.)
 - Preserve table structure using markdown table syntax
-- The full_text should be a clean markdown representation of the entire paper
-- Be thorough — do NOT skip or summarize any content
-- Return ONLY valid JSON, no markdown code fences or extra text"""
+- For figures: describe what the figure visually shows (charts, diagrams, \
+architecture, plots, etc.)
+- Extract all numbered references from the References/Bibliography section
+- Do NOT include full section text — use content_summary instead
+- Be thorough — extract EVERY equation, table, figure, and reference
+- Return ONLY valid JSON, no markdown fences or extra text"""
 
 
 # ---------------------------------------------------------------------------
@@ -83,9 +101,13 @@ Rules:
 async def parse_pdf(file_path: str) -> dict[str, Any]:
     """Parse a PDF file and return structured paper data.
 
-    Strategy:
-        1. Try Gemini 3 Flash Vision via OpenRouter (state-of-the-art accuracy).
-        2. Fall back to PyMuPDF4LLM if Gemini fails or file is too large.
+    Hybrid strategy:
+        1. PyMuPDF4LLM extracts raw full_text (fast, offline, free).
+        2. Gemini Vision extracts structured data (metadata, sections,
+           equations, tables, figures, references).
+        3. Results are merged into a single unified response.
+
+    Falls back to PyMuPDF-only if Gemini Vision fails.
     """
     pdf_path = Path(file_path)
     if not pdf_path.exists():
@@ -98,7 +120,11 @@ async def parse_pdf(file_path: str) -> dict[str, Any]:
         "Parsing PDF: %s (%.1f MB)", pdf_path.name, file_size_mb,
     )
 
-    # Decide parser based on config and file size
+    # Step 1: Always extract full_text with PyMuPDF4LLM (instant, free)
+    full_text = await _extract_full_text_pymupdf(pdf_path)
+    logger.info("PyMuPDF4LLM extracted %d chars of full text", len(full_text))
+
+    # Step 2: Try Gemini Vision for structured extraction
     use_gemini = (
         settings.PDF_PARSER_PRIMARY == "gemini_vision"
         and file_size_mb <= settings.PDF_MAX_SIZE_MB
@@ -106,27 +132,46 @@ async def parse_pdf(file_path: str) -> dict[str, Any]:
 
     if use_gemini:
         try:
-            result = await _parse_with_gemini_vision(pdf_bytes, pdf_path.name)
+            structured = await _parse_with_gemini_vision(pdf_bytes, pdf_path.name)
             logger.info(
-                "Gemini Vision parsed PDF: %d sections, %d equations",
-                len(result.get("sections", [])),
-                len(result.get("equations", [])),
+                "Gemini Vision: %d sections, %d equations, %d references",
+                len(structured.get("sections", [])),
+                len(structured.get("equations", [])),
+                len(structured.get("references", [])),
             )
-            return result
+            # Merge: Gemini structured data + PyMuPDF full_text
+            structured["full_text"] = full_text
+            return structured
         except Exception as exc:
             logger.warning(
-                "Gemini Vision parsing failed, falling back to PyMuPDF4LLM: %s",
-                exc,
+                "Gemini Vision failed, using PyMuPDF-only fallback: %s", exc,
             )
 
-    # Fallback: PyMuPDF4LLM (lightweight, offline)
-    result = await _parse_with_pymupdf(pdf_path)
+    # Fallback: structure from PyMuPDF heuristics
+    result = _build_structure_from_text(full_text, pdf_path.name)
     logger.info(
-        "PyMuPDF4LLM parsed PDF: %d sections, %d equations",
+        "PyMuPDF fallback: %d sections, %d equations",
         len(result.get("sections", [])),
         len(result.get("equations", [])),
     )
     return result
+
+
+# ---------------------------------------------------------------------------
+# PyMuPDF4LLM: fast full-text extraction (always runs)
+# ---------------------------------------------------------------------------
+async def _extract_full_text_pymupdf(pdf_path: Path) -> str:
+    """Extract raw markdown text from PDF using PyMuPDF4LLM.
+
+    This is CPU-bound, so it runs in a thread pool. It's instant and
+    provides the complete paper text that Gemini Vision doesn't need
+    to reproduce in its JSON output.
+    """
+    import pymupdf4llm
+
+    return await asyncio.to_thread(
+        pymupdf4llm.to_markdown, str(pdf_path),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -135,10 +180,11 @@ async def parse_pdf(file_path: str) -> dict[str, Any]:
 async def _parse_with_gemini_vision(
     pdf_bytes: bytes, filename: str,
 ) -> dict[str, Any]:
-    """Send the PDF to Gemini 3 Flash via OpenRouter for vision-based parsing.
+    """Send the PDF to Gemini 3 Flash for structured extraction.
 
-    The PDF is base64-encoded and sent as a multimodal message. Gemini
-    natively understands PDF layout, equations, tables, and figures.
+    Extracts metadata, sections (with summaries), equations (LaTeX),
+    tables (markdown), figures (descriptions), and references.
+    Does NOT extract full_text — that comes from PyMuPDF4LLM.
     """
     b64_data = base64.b64encode(pdf_bytes).decode("utf-8")
     client = get_client()
@@ -165,8 +211,8 @@ async def _parse_with_gemini_vision(
                     ],
                 }
             ],
-            temperature=0.1,  # Low temperature for extraction accuracy
-            max_tokens=16384,
+            temperature=0.1,  # Low for extraction accuracy
+            max_tokens=32768,  # Structured data fits well within this
         ),
         timeout=settings.PDF_PARSER_TIMEOUT,
     )
@@ -175,21 +221,23 @@ async def _parse_with_gemini_vision(
     if not raw_content:
         raise ValueError("Gemini returned empty response")
 
-    # Parse the JSON from the response (strip any markdown fences if present)
+    # Parse JSON from response (strip markdown fences if present)
     json_str = _extract_json(raw_content)
     data = json.loads(json_str)
 
-    # Normalize the response to match our expected format
     return _normalize_gemini_response(data, filename)
 
 
+# ---------------------------------------------------------------------------
+# JSON extraction and normalization
+# ---------------------------------------------------------------------------
 def _extract_json(text: str) -> str:
     """Extract JSON from LLM response, stripping markdown fences if present."""
-    # Try to find JSON in markdown code block
+    # Try markdown code block
     match = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", text, re.DOTALL)
     if match:
         return match.group(1).strip()
-    # Try to find raw JSON object
+    # Try raw JSON object
     match = re.search(r"\{.*\}", text, re.DOTALL)
     if match:
         return match.group(0)
@@ -199,64 +247,65 @@ def _extract_json(text: str) -> str:
 def _normalize_gemini_response(
     data: dict[str, Any], filename: str,
 ) -> dict[str, Any]:
-    """Normalize Gemini's response to match the expected PaperStructure format."""
+    """Normalize Gemini's response to the expected PaperStructure format."""
+    # Metadata
     metadata = data.get("metadata", {})
     metadata.setdefault("title", Path(filename).stem)
     metadata.setdefault("authors", [])
     metadata.setdefault("abstract", "")
     metadata.setdefault("num_pages", 0)
+    metadata.setdefault("published_date", None)
+    metadata.setdefault("doi", None)
     metadata.setdefault("source", "pdf_upload")
 
+    # Sections
     sections = []
     for s in data.get("sections", []):
         sections.append({
             "title": s.get("title", "Untitled"),
-            "content": s.get("content", ""),
+            "content": s.get("content_summary", s.get("content", "")),
             "equations": s.get("equations", []),
             "tables": s.get("tables", []),
             "figures": s.get("figures", []),
+            "key_findings": s.get("key_findings", []),
         })
 
-    # Try to extract abstract from sections if not in metadata
+    # Extract abstract from sections if not in metadata
     if not metadata["abstract"]:
         for section in sections:
             if section["title"].lower().strip() in ("abstract",):
-                metadata["abstract"] = section["content"][:500]
+                metadata["abstract"] = section["content"][:1000]
                 break
+
+    # References
+    references = data.get("references", [])
 
     return {
         "metadata": metadata,
-        "full_text": data.get("full_text", ""),
+        "full_text": "",  # Filled by caller with PyMuPDF4LLM output
         "sections": sections,
         "equations": data.get("equations", []),
+        "references": references,
+        "key_contributions": data.get("key_contributions", []),
     }
 
 
 # ---------------------------------------------------------------------------
-# Fallback parser: PyMuPDF4LLM (offline, no ML)
+# Fallback: build structure from PyMuPDF raw text only
 # ---------------------------------------------------------------------------
-async def _parse_with_pymupdf(pdf_path: Path) -> dict[str, Any]:
-    """Parse a PDF using PyMuPDF4LLM as a lightweight offline fallback.
+def _build_structure_from_text(
+    md_text: str, filename: str,
+) -> dict[str, Any]:
+    """Build a structured response from PyMuPDF4LLM markdown text.
 
-    This is heuristic-based — good for text extraction but weaker on
-    equations and complex tables compared to Gemini Vision.
+    This is the pure-offline fallback — heuristic-based, weaker on
+    equations/tables/figures, but always works.
     """
-    import pymupdf4llm  # Lazy import to avoid loading if Gemini succeeds
-
-    logger.info("Parsing PDF with PyMuPDF4LLM (fallback): %s", pdf_path.name)
-
-    # PyMuPDF4LLM is CPU-bound, offload to thread pool
-    md_text = await asyncio.to_thread(
-        pymupdf4llm.to_markdown, str(pdf_path),
-    )
-
-    # Extract structure from markdown
     sections = _extract_sections(md_text)
     equations = _extract_equations(md_text)
 
-    # Build metadata
     metadata = {
-        "title": pdf_path.stem,
+        "title": filename.replace(".pdf", "").replace("_", " "),
         "authors": [],
         "abstract": "",
         "num_pages": 0,
@@ -266,7 +315,7 @@ async def _parse_with_pymupdf(pdf_path: Path) -> dict[str, Any]:
     # Try to get abstract from sections
     for section in sections:
         if section["title"].lower().strip() in ("abstract",):
-            metadata["abstract"] = section["content"][:500]
+            metadata["abstract"] = section["content"][:1000]
             break
 
     return {
@@ -279,18 +328,21 @@ async def _parse_with_pymupdf(pdf_path: Path) -> dict[str, Any]:
                 "equations": s.get("equations", []),
                 "tables": s.get("tables", []),
                 "figures": s.get("figures", []),
+                "key_findings": [],
             }
             for s in sections
         ],
         "equations": equations,
+        "references": [],
+        "key_contributions": [],
     }
 
 
 # ---------------------------------------------------------------------------
-# Shared helpers (used by PyMuPDF4LLM fallback)
+# Heuristic helpers (used by PyMuPDF fallback)
 # ---------------------------------------------------------------------------
 def _extract_sections(md_text: str) -> list[dict[str, Any]]:
-    """Extract sections from markdown text."""
+    """Extract sections from markdown text using heading patterns."""
     sections: list[dict[str, Any]] = []
     current_section: dict[str, Any] | None = None
 
@@ -311,6 +363,7 @@ def _extract_sections(md_text: str) -> list[dict[str, Any]]:
         elif current_section is not None:
             current_section["content"] += line + "\n"
 
+            # Detect equations
             if "$" in line or "\\begin{" in line:
                 current_section["equations"].append(line.strip())
 

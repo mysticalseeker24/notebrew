@@ -50,7 +50,7 @@ class Settings(BaseSettings):
 
     # PDF Parser Configuration
     PDF_PARSER_PRIMARY: str = "gemini_vision"     # "gemini_vision" or "pymupdf"
-    PDF_PARSER_TIMEOUT: int = 60                  # seconds for Gemini API call
+    PDF_PARSER_TIMEOUT: int = 120                 # seconds for Gemini API call
     PDF_MAX_SIZE_MB: int = 20                     # max PDF size for Gemini vision
     PDF_VISION_MODEL: str = "google/gemini-3-flash-preview"  # model for PDF parsing
 

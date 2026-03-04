@@ -52,7 +52,7 @@ cp .env.example .env
 python -m app.main
 ```
 
-The API runs at `http://localhost:8000`. Docs are available at `http://localhost:8000/docs`.
+The API runs at `http://localhost:8001`. Docs are available at `http://localhost:8001/docs`.
 
 ### Frontend
 
