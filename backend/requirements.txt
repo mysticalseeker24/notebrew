@@ -1,28 +1,30 @@
 # ═══════════════════════════════════════════════════
 # NoteBrew — Python Dependencies
+# Latest compatible versions as of March 2026
 # ═══════════════════════════════════════════════════
 
 # Core Framework
-fastapi==0.115.0
-uvicorn[standard]==0.32.0
-python-multipart==0.0.12
-pydantic==2.9.2
-pydantic-settings==2.6.0
+fastapi==0.135.1
+uvicorn[standard]==0.41.0
+python-multipart==0.0.22
+pydantic==2.12.5
+pydantic-settings==2.13.1
 
-# PDF Processing (Docling)
-docling>=2.0.0
+# PDF Processing (PyMuPDF4LLM — lightweight fallback parser)
+# Primary parser uses Gemini Vision via OpenRouter (no extra deps)
+pymupdf4llm==0.3.4
 
 # LLM & AI (OpenRouter via OpenAI SDK)
-openai>=2.0.0
+openai==2.24.0
 
 # Notebook Generation
 nbformat==5.10.4
-nbconvert==7.16.4
+nbconvert==7.17.0
 
 # arXiv Integration
-arxiv==2.1.3
-requests==2.32.3
+arxiv==2.4.0
+requests==2.32.5
 
 # Utilities
-python-dotenv==1.0.1
-aiofiles==24.1.0
+python-dotenv==1.2.2
+aiofiles==25.1.0

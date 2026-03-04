@@ -43,7 +43,7 @@ TOOL_SCHEMA = {
 async def parse_arxiv_paper(
     arxiv_url: str, save_dir: str | None = None
 ) -> dict[str, Any]:
-    """Download an arXiv paper and parse it with Docling.
+    """Download an arXiv paper and parse it with Gemini Vision / PyMuPDF4LLM.
 
     Args:
         arxiv_url: arXiv URL or paper ID.

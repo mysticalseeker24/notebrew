@@ -12,6 +12,7 @@
 3. **Context review on every new session** — When starting a new conversation or window, summarize what you've read from this file and confirm with the user before taking any action.
 4. **No assumptions** — If something is unclear or missing from this context, ask the user rather than guessing.
 5. **Update this file** — After completing work, update the "Current Status" section at the bottom of this file to reflect what changed.
+6. **Use latest stable versions** — Always use the latest stable, non-deprecated versions of all dependencies. Check for updates before adding new packages. Pin exact versions in requirements files.
 
 ## Overview
 
@@ -36,7 +37,10 @@ User → Frontend (Next.js 14) → FastAPI REST API → Agent Orchestrator
                                                        │
                           ┌──────────┬──────────┬──────┴───┬──────────┬──────────┐
                     parse_pdf  parse_arxiv  plan_notebook  generate_code  validate_code  assemble_notebook
-                    (Docling)  (arxiv lib)  (LLM plan)     (LLM gen)      (ast.parse)    (nbformat)
+                    (Gemini    (arxiv lib)  (LLM plan)     (LLM gen)      (ast.parse)    (nbformat)
+                     Vision +
+                     PyMuPDF
+                     fallback)
 ```
 
 - **Agent loop**: Orchestrator sends conversation + tool schemas to LLM → LLM returns tool calls → execute → append results → loop
@@ -49,7 +53,7 @@ User → Frontend (Next.js 14) → FastAPI REST API → Agent Orchestrator
 |----------|-----------|
 | Backend  | Python 3.11+, FastAPI, Uvicorn |
 | Frontend | Next.js 14, TypeScript, Tailwind CSS |
-| PDF      | Docling (IBM) — deep learning PDF parser |
+| PDF      | Gemini 3 Flash Vision (primary), PyMuPDF4LLM (fallback) |
 | LLM      | Gemini 3 Flash Preview (primary), MiniMax M2.5 (fallback) |
 | LLM API  | OpenRouter via OpenAI SDK v2+ |
 | Notebook | nbformat |
@@ -65,7 +69,7 @@ User → Frontend (Next.js 14) → FastAPI REST API → Agent Orchestrator
 ├── backend/
 │   ├── .env                       # Secrets (git-ignored)
 │   ├── .env.example               # Template
-│   ├── requirements.txt           # Python deps (docling, openai>=2.0.0, fastapi, etc.)
+│   ├── requirements.txt           # Python deps (pymupdf4llm, openai>=2.0.0, fastapi, etc.)
 │   └── app/
 │       ├── main.py                # FastAPI app, routes, agent runner
 │       ├── config.py              # Pydantic settings (SettingsConfigDict)
@@ -75,7 +79,7 @@ User → Frontend (Next.js 14) → FastAPI REST API → Agent Orchestrator
 │           ├── orchestrator.py    # Custom tool-calling loop
 │           ├── tool_registry.py   # Tool schema + execution registry
 │           ├── tools/
-│           │   ├── parse_pdf.py   # Docling PDF parser (thread pool, batch)
+│           │   ├── parse_pdf.py   # Hybrid PDF parser (Gemini Vision + PyMuPDF4LLM fallback)
 │           │   ├── parse_arxiv.py # arXiv download + parse
 │           │   ├── plan_notebook.py
 │           │   ├── generate_code.py
@@ -102,17 +106,19 @@ PORT=8001
 DEBUG=True
 AGENT_MAX_ITERATIONS=15
 AGENT_MAX_RETRIES=3
-DOCLING_OCR_ENABLED=True
-DOCLING_EXTRACT_TABLES=True
+PDF_PARSER_PRIMARY=gemini_vision    # "gemini_vision" or "pymupdf"
+PDF_PARSER_TIMEOUT=60
+PDF_MAX_SIZE_MB=20
+PDF_VISION_MODEL=google/gemini-3-flash-preview
 ```
 
 ## Key Design Decisions
 
 1. **Custom agent over LangGraph** — More control, no framework lock-in, lighter weight
-2. **Docling over PyMuPDF** — Deep learning parser handles complex layouts, tables, equations
-3. **Shared LLM client** — Singleton `get_client()` in `llm_client.py` with connection pooling
-4. **Thread pool for Docling** — `asyncio.to_thread()` prevents blocking the event loop
-5. **Batch processing** — `ocr_batch_size=4`, `layout_batch_size=4`, `table_batch_size=4`
+2. **Gemini Vision over Docling** — Cloud-based vision parsing, zero GPU needed, best accuracy
+3. **PyMuPDF4LLM fallback** — Lightweight offline fallback when API unavailable or PDF too large
+4. **Shared LLM client** — Singleton `get_client()` in `llm_client.py` with connection pooling
+5. **Base64 PDF passthrough** — PDFs sent to Gemini via OpenRouter multimodal API
 6. **OpenRouter** — Unified API for multiple models (Gemini, MiniMax)
 
 ## Known Issues & Past Debugging
@@ -121,16 +127,16 @@ DOCLING_EXTRACT_TABLES=True
 |-------|-----------|-----|
 | `proxies` TypeError | openai 1.54 + httpx 0.28 incompatibility | Upgraded to openai>=2.0.0 |
 | 401 Missing Auth | Stale `OPENROUTER_API_KEY` env var overriding `.env` | Clear env var: `Remove-Item Env:OPENROUTER_API_KEY` |
-| `PdfPipelineOptions no attr backend` | Wrong Docling API: need `PdfFormatOption` wrapper | `format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=...)}` |
 | `finish_reason=length` loop | max_tokens=4096 too small for tool calls | Increased to 16384, added truncation recovery |
-| Pydantic `model_` warnings | Docling models use `model_spec` field name | `model_config = ConfigDict(protected_namespaces=())` |
 | Pydantic `class Config` deprecation | Old v1 syntax | Use `model_config = SettingsConfigDict(...)` |
+| Docling slow + heavy | Deep learning models, GPU needed, Pydantic conflicts | Replaced with Gemini Vision + PyMuPDF4LLM hybrid |
 
 ## Current Status
 
 - ✅ Backend runs on port 8001
 - ✅ All 6 agent tools registered
-- ✅ Docling PDF parsing works (thread pool + batch)
+- ✅ Hybrid PDF parsing: Gemini Vision primary, PyMuPDF4LLM fallback
 - ✅ Agent loop executes (tool calls, retries, fallback)
+- ✅ Zero GPU requirements — all ML runs in the cloud
 - ⚠️ Frontend not tested (npm install needed)
-- ⚠️ End-to-end notebook generation needs more testing with different papers
+- ⚠️ End-to-end notebook generation needs testing with different papers

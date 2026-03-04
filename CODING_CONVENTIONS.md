@@ -41,6 +41,14 @@ Consistent coding conventions are essential for maintaining code quality and ena
 - Use custom exception classes for domain errors
 - Log errors with enough detail to debug
 
+### Dependency Management
+
+- **Always use the latest stable versions** of all dependencies — no deprecated or outdated packages
+- **Pin exact versions** in `requirements.txt` and `package.json` for reproducibility
+- **Periodically audit** dependencies for newer releases and compatibility
+- **No legacy systems** — if a library is deprecated, replace it with the modern alternative
+- Before adding a new dependency, check: is it actively maintained? When was the last release?
+
 ---
 
 ## Python Backend Conventions
@@ -210,9 +218,9 @@ notebrew/
 │   │   ├── models.py          # Pydantic data models
 │   │   ├── agent/             # AI Agent system
 │   │   │   ├── orchestrator.py
-│   │   │   ├── tools/         # Agent tools
+│   │   │   ├── tools/         # Agent tools (Gemini Vision PDF, code gen, etc.)
 │   │   │   └── prompts/       # Prompt templates
-│   │   ├── parsers/           # PDF parsing (Docling)
+│   │   ├── parsers/           # PDF parsing (Gemini Vision + PyMuPDF4LLM)
 │   │   └── generators/        # Notebook generation
 │   ├── tests/
 │   ├── requirements.txt
@@ -372,7 +380,7 @@ Types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, `perf`
 # ✅ Good
 feat(agent): add code validation tool with syntax checking
 fix(parser): handle multi-column PDF layouts correctly
-docs(readme): update quick start with Docling setup
+docs(readme): update quick start with setup instructions
 
 # ❌ Bad
 fixed stuff
