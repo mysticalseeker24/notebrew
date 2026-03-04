@@ -13,6 +13,7 @@ pydantic-settings==2.13.1
 # PDF Processing (PyMuPDF4LLM — lightweight fallback parser)
 # Primary parser uses Gemini Vision via OpenRouter (no extra deps)
 pymupdf4llm==0.3.4
+pymupdf-layout==1.27.1  # Enhanced page layout analysis for PyMuPDF4LLM
 
 # LLM & AI (OpenRouter via OpenAI SDK)
 openai==2.24.0

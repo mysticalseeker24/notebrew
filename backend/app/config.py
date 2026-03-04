@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
         case_sensitive=True,
+        extra="ignore",  # Ignore unknown env vars (e.g., old DOCLING_* vars)
     )
 
     # API Keys
