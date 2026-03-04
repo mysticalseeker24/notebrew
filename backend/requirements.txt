@@ -13,7 +13,7 @@ pydantic-settings==2.6.0
 docling>=2.0.0
 
 # LLM & AI (OpenRouter via OpenAI SDK)
-openai==1.54.3
+openai>=2.0.0
 
 # Notebook Generation
 nbformat==5.10.4

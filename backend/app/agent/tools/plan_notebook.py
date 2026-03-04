@@ -6,8 +6,7 @@ import json
 import logging
 from typing import Any
 
-import openai
-
+from app.llm_client import get_client
 from app.config import settings
 from app.agent.prompts.templates import PLAN_NOTEBOOK_PROMPT
 
@@ -75,10 +74,7 @@ async def plan_notebook(paper_data: dict[str, Any]) -> dict[str, Any]:
 
     logger.info("Planning notebook for: %s", metadata.get("title", "Unknown"))
 
-    client = openai.AsyncOpenAI(
-        base_url=settings.OPENROUTER_BASE_URL,
-        api_key=settings.OPENROUTER_API_KEY,
-    )
+    client = get_client()
 
     response = await client.chat.completions.create(
         model=settings.GEMINI_3_FLASH_MODEL,

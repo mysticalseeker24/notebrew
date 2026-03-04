@@ -31,13 +31,17 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Read version from VERSION file
+_VERSION_FILE = Path(__file__).resolve().parent.parent.parent / "VERSION"
+__version__ = _VERSION_FILE.read_text().strip() if _VERSION_FILE.exists() else "2.1.0"
+
 # ---------------------------------------------------------------------------
 # FastAPI App
 # ---------------------------------------------------------------------------
 app = FastAPI(
     title="NoteBrew API",
     description="AI agent that converts research papers into executable Jupyter notebooks",
-    version="2.0.0",
+    version=__version__,
 )
 
 app.add_middleware(
@@ -115,7 +119,7 @@ tool_registry = _build_tool_registry()
 async def root():
     return {
         "name": "NoteBrew API",
-        "version": "2.0.0",
+        "version": __version__,
         "description": "AI agent that converts research papers into Jupyter notebooks",
         "docs": "/docs",
     }

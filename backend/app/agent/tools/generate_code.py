@@ -6,8 +6,7 @@ import logging
 import re
 from typing import Any
 
-import openai
-
+from app.llm_client import get_client
 from app.config import settings
 from app.agent.prompts.templates import GENERATE_CODE_PROMPT, GENERATE_MARKDOWN_PROMPT
 
@@ -113,10 +112,7 @@ async def generate_code(
 
     logger.info("Generating %s cell: %s", cell_type, cell_purpose[:60])
 
-    client = openai.AsyncOpenAI(
-        base_url=settings.OPENROUTER_BASE_URL,
-        api_key=settings.OPENROUTER_API_KEY,
-    )
+    client = get_client()
 
     system_msg = (
         "You are an expert ML researcher and PyTorch developer. "

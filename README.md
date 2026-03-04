@@ -73,7 +73,7 @@ cp .env.example .env
 python -m app.main
 ```
 
-Backend runs at `http://localhost:8000` (API docs: `http://localhost:8000/docs`)
+Backend runs at `http://localhost:8001` (API docs: `http://localhost:8001/docs`)
 
 ### 3. Frontend Setup
 

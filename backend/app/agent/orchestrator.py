@@ -9,6 +9,7 @@ from typing import Any, Callable, Optional
 import openai
 
 from app.config import settings
+from app.llm_client import get_client
 from app.models import (
     AgentState,
     ProcessingStatus,
@@ -37,24 +38,12 @@ class AgentOrchestrator:
         model: Optional[str] = None,
         on_progress: Optional[Callable[[str, float, str], None]] = None,
     ) -> None:
-        """Initialize the orchestrator.
-
-        Args:
-            tool_registry: Registry containing all available tools.
-            model: Model identifier (e.g., 'gemini-3-flash-preview').
-            on_progress: Callback ``(status, progress_pct, message)`` for
-                real-time progress updates.
-        """
         self.registry = tool_registry
         self.model = model or settings.PRIMARY_MODEL
         self.on_progress = on_progress
         self.max_iterations = settings.AGENT_MAX_ITERATIONS
         self.max_retries = settings.AGENT_MAX_RETRIES
-
-        self.client = openai.AsyncOpenAI(
-            base_url=settings.OPENROUTER_BASE_URL,
-            api_key=settings.OPENROUTER_API_KEY,
-        )
+        self.client = get_client()
 
     def _get_model_name(self) -> str:
         """Resolve short model name to full OpenRouter model path."""
@@ -70,17 +59,7 @@ class AgentOrchestrator:
             self.on_progress(status, progress, message)
 
     async def run(self, task_description: str, state: AgentState) -> AgentState:
-        """Run the agent loop until completion or max iterations.
-
-        Args:
-            task_description: The user-facing task (e.g., 'Convert this paper
-                to a Jupyter notebook').
-            state: Mutable agent state that accumulates results.
-
-        Returns:
-            Updated AgentState with the final result or error.
-        """
-        # Build initial messages
+        """Run the agent loop until completion or max iterations."""
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": task_description},
@@ -91,9 +70,7 @@ class AgentOrchestrator:
 
         for iteration in range(1, self.max_iterations + 1):
             state.iteration = iteration
-            logger.info(
-                "Agent iteration %d/%d", iteration, self.max_iterations
-            )
+            logger.info("Agent iteration %d/%d", iteration, self.max_iterations)
             self._emit_progress(
                 state.status.value,
                 min(10 + (iteration / self.max_iterations) * 80, 90),
@@ -113,10 +90,8 @@ class AgentOrchestrator:
 
             # ----- Case 1: LLM wants to call tools -----
             if assistant_msg.tool_calls:
-                # Append the assistant message (with tool_calls) to history
                 messages.append(self._assistant_msg_to_dict(assistant_msg))
 
-                # Execute all requested tool calls
                 tool_calls_info = []
                 for tc in assistant_msg.tool_calls:
                     try:
@@ -138,7 +113,6 @@ class AgentOrchestrator:
                     [c["name"] for c in tool_calls_info],
                 )
 
-                # Update progress with current tool names
                 tool_names = ", ".join(c["name"] for c in tool_calls_info)
                 self._emit_progress(
                     state.status.value,
@@ -146,10 +120,8 @@ class AgentOrchestrator:
                     f"Running tools: {tool_names}",
                 )
 
-                # Execute tools (concurrently if multiple)
                 results = await self.registry.execute_parallel(tool_calls_info)
 
-                # Append tool results to message history
                 for result in results:
                     result_content = (
                         json.dumps(result.result, default=str)
@@ -163,13 +135,11 @@ class AgentOrchestrator:
                             "content": result_content,
                         }
                     )
-
-                    # Update state based on tool results
                     self._update_state_from_tool(state, result)
 
-                continue  # Loop back to ask LLM what to do next
+                continue
 
-            # ----- Case 2: LLM returns a final text response -----
+            # ----- Case 2: Final text response -----
             if choice.finish_reason == "stop" and assistant_msg.content:
                 logger.info("Agent completed with final message")
                 if state.status != ProcessingStatus.FAILED:
@@ -179,7 +149,20 @@ class AgentOrchestrator:
                 )
                 return state
 
-            # ----- Case 3: Unexpected response -----
+            # ----- Case 3: Truncated response (finish_reason=length) -----
+            if choice.finish_reason == "length":
+                logger.warning("Response truncated, asking to continue")
+                messages.append(self._assistant_msg_to_dict(assistant_msg))
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "Your response was truncated. Please continue with shorter "
+                        "tool calls. Call one tool at a time with concise arguments."
+                    ),
+                })
+                continue
+
+            # ----- Case 4: Unexpected response -----
             logger.warning(
                 "Unexpected finish_reason=%s, content=%s",
                 choice.finish_reason,
@@ -190,7 +173,6 @@ class AgentOrchestrator:
         # Max iterations reached
         logger.warning("Agent reached max iterations (%d)", self.max_iterations)
         if state.notebook_path:
-            # We have a notebook even if we hit the limit
             state.status = ProcessingStatus.COMPLETED
             self._emit_progress(
                 state.status.value, 100, "Notebook generated (max iterations reached)"
@@ -207,10 +189,7 @@ class AgentOrchestrator:
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
     ) -> Any:
-        """Make a single LLM API call with tool definitions.
-
-        Includes retry logic with fallback to the secondary model.
-        """
+        """Make a single LLM API call with retry + fallback logic."""
         model_name = self._get_model_name()
 
         for attempt in range(1, self.max_retries + 1):
@@ -220,7 +199,7 @@ class AgentOrchestrator:
                     messages=messages,
                     tools=tools if tools else openai.NOT_GIVEN,
                     temperature=0.3,
-                    max_tokens=4096,
+                    max_tokens=16384,
                 )
                 return response
             except Exception as exc:
@@ -231,10 +210,10 @@ class AgentOrchestrator:
                     exc,
                 )
                 if attempt == self.max_retries:
-                    # Try fallback model on final attempt
-                    if model_name != self._get_fallback_model_name():
-                        logger.info("Switching to fallback model")
-                        model_name = self._get_fallback_model_name()
+                    fallback = self._get_fallback_model_name()
+                    if model_name != fallback:
+                        logger.info("Switching to fallback model: %s", fallback)
+                        model_name = fallback
                         continue
                     raise
 

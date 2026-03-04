@@ -1,11 +1,16 @@
 """NoteBrew configuration — settings and environment variables."""
 
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Literal
 
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables and .env file."""
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        case_sensitive=True,
+    )
 
     # API Keys
     OPENROUTER_API_KEY: str
@@ -25,7 +30,7 @@ class Settings(BaseSettings):
 
     # Server Configuration
     HOST: str = "0.0.0.0"
-    PORT: int = 8000
+    PORT: int = 8001
     DEBUG: bool = False
 
     # File Upload
@@ -46,10 +51,6 @@ class Settings(BaseSettings):
     DOCLING_OCR_ENABLED: bool = True
     DOCLING_EXTRACT_FIGURES: bool = True
     DOCLING_EXTRACT_TABLES: bool = True
-
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
 
 
 settings = Settings()
