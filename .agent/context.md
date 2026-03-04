@@ -133,10 +133,13 @@ PDF_VISION_MODEL=google/gemini-3-flash-preview
 
 ## Current Status
 
-- ✅ Backend runs on port 8001
+- ✅ Backend runs on port 8001 (v2.2.0, commit `dc609d7`)
 - ✅ All 6 agent tools registered
-- ✅ Hybrid PDF parsing: Gemini Vision primary, PyMuPDF4LLM fallback
+- ✅ Hybrid PDF parsing: Gemini Vision (structure) + PyMuPDF4LLM (full_text)
 - ✅ Agent loop executes (tool calls, retries, fallback)
 - ✅ Zero GPU requirements — all ML runs in the cloud
+- ✅ All dependencies at latest versions (March 2026)
+- ✅ No Docling references in codebase
+- ✅ Pushed to GitHub main branch
 - ⚠️ Frontend not tested (npm install needed)
 - ⚠️ End-to-end notebook generation needs testing with different papers
