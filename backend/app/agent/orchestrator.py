@@ -36,7 +36,9 @@ class AgentOrchestrator:
         self,
         tool_registry: ToolRegistry,
         model: Optional[str] = None,
-        on_progress: Optional[Callable[[str, float, str], None]] = None,
+        on_progress: Optional[
+            Callable[[str, float, str, Optional[str], Optional[str]], None]
+        ] = None,
     ) -> None:
         self.registry = tool_registry
         self.model = model or settings.PRIMARY_MODEL
@@ -53,10 +55,30 @@ class AgentOrchestrator:
         }
         return mapping.get(self.model, settings.GEMINI_3_FLASH_MODEL)
 
-    def _emit_progress(self, status: str, progress: float, message: str) -> None:
+    @staticmethod
+    def _status_for_tool(tool_name: str) -> str:
+        """Map tool names to processing status values used by the status API."""
+        mapping = {
+            "parse_pdf": ProcessingStatus.PARSING_PDF.value,
+            "parse_arxiv": ProcessingStatus.PARSING_PDF.value,
+            "plan_notebook": ProcessingStatus.PLANNING.value,
+            "generate_code": ProcessingStatus.GENERATING_CODE.value,
+            "validate_code": ProcessingStatus.VALIDATING_CODE.value,
+            "assemble_notebook": ProcessingStatus.ASSEMBLING_NOTEBOOK.value,
+        }
+        return mapping.get(tool_name, ProcessingStatus.PLANNING.value)
+
+    def _emit_progress(
+        self,
+        status: str,
+        progress: float,
+        message: str,
+        current_tool: Optional[str] = None,
+        current_section: Optional[str] = None,
+    ) -> None:
         """Emit a progress update if a callback is registered."""
         if self.on_progress:
-            self.on_progress(status, progress, message)
+            self.on_progress(status, progress, message, current_tool, current_section)
 
     async def run(self, task_description: str, state: AgentState) -> AgentState:
         """Run the agent loop until completion or max iterations."""
@@ -75,6 +97,7 @@ class AgentOrchestrator:
                 state.status.value,
                 min(10 + (iteration / self.max_iterations) * 80, 90),
                 f"Agent thinking (step {iteration})...",
+                current_tool=None,
             )
 
             try:
@@ -115,9 +138,10 @@ class AgentOrchestrator:
 
                 tool_names = ", ".join(c["name"] for c in tool_calls_info)
                 self._emit_progress(
-                    state.status.value,
+                    self._status_for_tool(tool_calls_info[0]["name"]) if tool_calls_info else state.status.value,
                     min(10 + (iteration / self.max_iterations) * 80, 90),
                     f"Running tools: {tool_names}",
+                    current_tool=tool_calls_info[0]["name"] if tool_calls_info else None,
                 )
 
                 results = await self.registry.execute_parallel(tool_calls_info)
@@ -145,7 +169,10 @@ class AgentOrchestrator:
                 if state.status != ProcessingStatus.FAILED:
                     state.status = ProcessingStatus.COMPLETED
                 self._emit_progress(
-                    state.status.value, 100, "Notebook generation complete"
+                    state.status.value,
+                    100,
+                    "Notebook generation complete",
+                    current_tool="assemble_notebook",
                 )
                 return state
 
@@ -175,12 +202,15 @@ class AgentOrchestrator:
         if state.notebook_path:
             state.status = ProcessingStatus.COMPLETED
             self._emit_progress(
-                state.status.value, 100, "Notebook generated (max iterations reached)"
+                state.status.value,
+                100,
+                "Notebook generated (max iterations reached)",
+                current_tool="assemble_notebook",
             )
         else:
             state.status = ProcessingStatus.FAILED
             state.error = "Agent exceeded maximum iterations without completing"
-            self._emit_progress(state.status.value, 0, state.error)
+            self._emit_progress(state.status.value, 0, state.error, current_tool=None)
 
         return state
 
@@ -253,7 +283,7 @@ class AgentOrchestrator:
         tool_name = result.name
         data = result.result
 
-        if tool_name == "parse_pdf" and isinstance(data, dict):
+        if tool_name in ("parse_pdf", "parse_arxiv") and isinstance(data, dict):
             from app.models import PaperStructure
             state.paper_structure = PaperStructure(**data)
             state.status = ProcessingStatus.PLANNING

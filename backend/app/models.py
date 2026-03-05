@@ -55,6 +55,11 @@ class ProgressUpdate(BaseModel):
     message: str
     current_tool: Optional[str] = None
     current_section: Optional[str] = None
+    notebook_url: Optional[str] = None
+    colab_url: Optional[str] = None
+    kaggle_url: Optional[str] = None
+    links_ready: bool = False
+    links_message: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -77,6 +82,9 @@ class PaperSection(BaseModel):
     figures: list[dict[str, Any]] = Field(
         default_factory=list, description="Figure references in this section"
     )
+    key_findings: list[str] = Field(
+        default_factory=list, description="Key findings extracted for this section"
+    )
 
 
 class PaperMetadata(BaseModel):
@@ -89,6 +97,7 @@ class PaperMetadata(BaseModel):
     abstract: str = ""
     arxiv_id: Optional[str] = None
     published_date: Optional[str] = None
+    doi: Optional[str] = None
     num_pages: int = 0
     source: str = ""  # "pdf_upload" or "arxiv"
 
@@ -104,6 +113,8 @@ class PaperStructure(BaseModel):
     equations: list[str] = Field(
         default_factory=list, description="All LaTeX equations in the paper"
     )
+    references: list[dict[str, Any]] = Field(default_factory=list)
+    key_contributions: list[str] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

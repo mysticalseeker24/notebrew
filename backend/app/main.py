@@ -1,6 +1,6 @@
 """NoteBrew API — FastAPI application with AI agent-powered paper-to-notebook conversion."""
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
+from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 import uuid
@@ -8,6 +8,7 @@ import logging
 from pathlib import Path
 import shutil
 from typing import Optional
+from urllib.parse import quote_plus
 
 from app.config import settings
 from app.models import (
@@ -58,6 +59,48 @@ Path(settings.OUTPUT_DIR).mkdir(exist_ok=True)
 
 # Task storage (use Redis / database in production)
 tasks: dict[str, dict] = {}
+
+
+def _apply_launch_template(template: str, notebook_url: str) -> str:
+    """Apply launch URL template with raw and encoded notebook URL placeholders."""
+    return (
+        template
+        .replace("{notebook_url}", notebook_url)
+        .replace("{notebook_url_encoded}", quote_plus(notebook_url))
+    )
+
+
+def _build_launch_links(task_id: str, notebook_path: str) -> dict[str, object]:
+    """Build notebook download URL and deep links for Colab/Kaggle.
+
+    Real deep links require a publicly reachable notebook URL. If no public base
+    URL is configured, fallback links are returned with links_ready=False.
+    """
+    notebook_name = Path(notebook_path).name
+    public_base = settings.PUBLIC_NOTEBOOK_BASE_URL.strip()
+
+    if public_base:
+        notebook_url = f"{public_base.rstrip('/')}/{notebook_name}"
+        colab_url = _apply_launch_template(settings.COLAB_URL_TEMPLATE, notebook_url)
+        kaggle_url = _apply_launch_template(settings.KAGGLE_URL_TEMPLATE, notebook_url)
+        return {
+            "notebook_url": notebook_url,
+            "colab_url": colab_url,
+            "kaggle_url": kaggle_url,
+            "links_ready": True,
+            "links_message": "Launch links are ready.",
+        }
+
+    local_notebook_url = f"http://localhost:{settings.PORT}/api/download/{task_id}"
+    return {
+        "notebook_url": local_notebook_url,
+        "colab_url": "https://colab.research.google.com/#create=true",
+        "kaggle_url": "https://www.kaggle.com/code/new",
+        "links_ready": False,
+        "links_message": (
+            "Configure PUBLIC_NOTEBOOK_BASE_URL to enable direct Colab/Kaggle deep links."
+        ),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -134,7 +177,7 @@ async def health_check():
 async def upload_pdf(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
-    model: Optional[str] = None,
+    model: Optional[str] = Form(default=None),
 ):
     """Upload a PDF paper and convert to notebook using the AI agent."""
 
@@ -154,6 +197,9 @@ async def upload_pdf(
         "status": ProcessingStatus.PENDING,
         "progress": 0,
         "message": "Processing started",
+        "current_tool": None,
+        "current_section": None,
+        "links_ready": False,
     }
 
     background_tasks.add_task(
@@ -182,6 +228,9 @@ async def process_arxiv(
         "status": ProcessingStatus.PENDING,
         "progress": 0,
         "message": "Downloading from arXiv",
+        "current_tool": None,
+        "current_section": None,
+        "links_ready": False,
     }
 
     background_tasks.add_task(
@@ -211,6 +260,12 @@ async def get_status(task_id: str):
         progress=task["progress"],
         message=task["message"],
         current_tool=task.get("current_tool"),
+        current_section=task.get("current_section"),
+        notebook_url=task.get("notebook_url"),
+        colab_url=task.get("colab_url"),
+        kaggle_url=task.get("kaggle_url"),
+        links_ready=task.get("links_ready", False),
+        links_message=task.get("links_message"),
     )
 
 
@@ -243,9 +298,21 @@ async def download_notebook(task_id: str):
 async def _run_agent(task_id: str, task_description: str, model: Optional[str]):
     """Run the AI agent to process a paper and generate a notebook."""
 
-    def on_progress(status: str, progress: float, message: str):
+    def on_progress(
+        status: str,
+        progress: float,
+        message: str,
+        current_tool: Optional[str] = None,
+        current_section: Optional[str] = None,
+    ):
         tasks[task_id].update(
-            {"status": status, "progress": progress, "message": message}
+            {
+                "status": status,
+                "progress": progress,
+                "message": message,
+                "current_tool": current_tool,
+                "current_section": current_section,
+            }
         )
 
     try:
@@ -259,22 +326,26 @@ async def _run_agent(task_id: str, task_description: str, model: Optional[str]):
         final_state = await orchestrator.run(task_description, state)
 
         if final_state.status == ProcessingStatus.COMPLETED and final_state.notebook_path:
+            launch_links = _build_launch_links(task_id, final_state.notebook_path)
             tasks[task_id].update({
                 "status": ProcessingStatus.COMPLETED,
                 "progress": 100,
                 "message": "Notebook generated successfully",
+                "current_tool": "assemble_notebook",
                 "notebook_path": final_state.notebook_path,
                 "metadata": (
                     final_state.paper_structure.metadata.model_dump()
                     if final_state.paper_structure
                     else {}
                 ),
+                **launch_links,
             })
         else:
             tasks[task_id].update({
                 "status": ProcessingStatus.FAILED,
                 "progress": 0,
                 "message": final_state.error or "Agent failed to complete",
+                "current_tool": None,
             })
 
     except Exception as exc:
@@ -283,6 +354,7 @@ async def _run_agent(task_id: str, task_description: str, model: Optional[str]):
             "status": ProcessingStatus.FAILED,
             "progress": 0,
             "message": f"Error: {exc}",
+            "current_tool": None,
         })
 
 

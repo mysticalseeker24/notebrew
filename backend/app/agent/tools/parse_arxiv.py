@@ -78,6 +78,7 @@ async def parse_arxiv_paper(
     result["metadata"]["published_date"] = (
         paper.published.isoformat() if paper.published else None
     )
+    result["metadata"]["doi"] = paper.doi
     result["metadata"]["source"] = "arxiv"
 
     return result

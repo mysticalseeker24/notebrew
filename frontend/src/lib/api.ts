@@ -23,6 +23,32 @@ export interface ProgressResponse {
   message: string
   current_tool?: string
   current_section?: string
+  notebook_url?: string
+  colab_url?: string
+  kaggle_url?: string
+  links_ready?: boolean
+  links_message?: string
+}
+
+function getApiErrorMessage(error: unknown, fallback: string): string {
+  if (axios.isAxiosError(error)) {
+    const detail = error.response?.data?.detail
+    if (typeof detail === 'string' && detail.trim()) {
+      return detail
+    }
+    if (typeof error.response?.data?.message === 'string' && error.response.data.message.trim()) {
+      return error.response.data.message
+    }
+    if (error.message) {
+      return error.message
+    }
+  }
+
+  if (error instanceof Error && error.message.trim()) {
+    return error.message
+  }
+
+  return fallback
 }
 
 export const uploadPDF = async (file: File, model?: string): Promise<NotebookResponse> => {
@@ -30,39 +56,53 @@ export const uploadPDF = async (file: File, model?: string): Promise<NotebookRes
   formData.append('file', file)
   if (model) formData.append('model', model)
 
-  const response = await api.post('/api/upload-pdf', formData, {
-    headers: {
-      'Content-Type': 'multipart/form-data',
-    },
-  })
-
-  return response.data
+  try {
+    const response = await api.post('/api/upload-pdf', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    })
+    return response.data
+  } catch (error) {
+    throw new Error(getApiErrorMessage(error, 'Failed to upload PDF'))
+  }
 }
 
 export const processArxiv = async (arxivUrl: string, model?: string): Promise<NotebookResponse> => {
-  const response = await api.post('/api/arxiv', {
-    arxiv_url: arxivUrl,
-    model,
-  })
-
-  return response.data
+  try {
+    const response = await api.post('/api/arxiv', {
+      arxiv_url: arxivUrl,
+      model,
+    })
+    return response.data
+  } catch (error) {
+    throw new Error(getApiErrorMessage(error, 'Failed to process arXiv paper'))
+  }
 }
 
 export const checkStatus = async (taskId: string): Promise<ProgressResponse> => {
-  const response = await api.get(`/api/status/${taskId}`)
-  return response.data
+  try {
+    const response = await api.get(`/api/status/${taskId}`)
+    return response.data
+  } catch (error) {
+    throw new Error(getApiErrorMessage(error, 'Failed to fetch task status'))
+  }
 }
 
 export const downloadNotebook = async (taskId: string): Promise<void> => {
-  const response = await api.get(`/api/download/${taskId}`, {
-    responseType: 'blob',
-  })
+  try {
+    const response = await api.get(`/api/download/${taskId}`, {
+      responseType: 'blob',
+    })
 
-  const url = window.URL.createObjectURL(new Blob([response.data]))
-  const link = document.createElement('a')
-  link.href = url
-  link.setAttribute('download', `notebrew_${taskId}.ipynb`)
-  document.body.appendChild(link)
-  link.click()
-  link.remove()
+    const url = window.URL.createObjectURL(new Blob([response.data]))
+    const link = document.createElement('a')
+    link.href = url
+    link.setAttribute('download', `notebrew_${taskId}.ipynb`)
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+  } catch (error) {
+    throw new Error(getApiErrorMessage(error, 'Failed to download notebook'))
+  }
 }

@@ -12,11 +12,11 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
 import { Navbar } from '@/components/Navbar'
 import { Footer } from '@/components/Footer'
-import { checkStatus, downloadNotebook } from '@/lib/api'
+import { checkStatus, downloadNotebook, type ProgressResponse } from '@/lib/api'
 
 /* ─── Step definitions ─── */
 const STEPS = [
-    { key: 'parse_pdf', label: 'Parsing PDF', icon: FileSearch },
+    { key: 'parse', label: 'Parsing paper', icon: FileSearch },
     { key: 'plan_notebook', label: 'Planning notebook', icon: Brain },
     { key: 'generate_code', label: 'Generating code', icon: Code },
     { key: 'validate_code', label: 'Validating code', icon: CheckCircle },
@@ -24,7 +24,8 @@ const STEPS = [
 ]
 
 function getStepIndex(tool: string): number {
-    const idx = STEPS.findIndex(s => tool.includes(s.key))
+    const normalized = tool.toLowerCase()
+    const idx = STEPS.findIndex(s => normalized.includes(s.key))
     return idx >= 0 ? idx : 0
 }
 
@@ -39,6 +40,16 @@ export default function BrewPage() {
     const [message, setMessage] = useState('Starting brew...')
     const [currentTool, setCurrentTool] = useState('')
     const [error, setError] = useState('')
+    const [launchLinks, setLaunchLinks] = useState<Pick<
+        ProgressResponse,
+        'notebook_url' | 'colab_url' | 'kaggle_url' | 'links_ready' | 'links_message'
+    >>({
+        notebook_url: undefined,
+        colab_url: undefined,
+        kaggle_url: undefined,
+        links_ready: false,
+        links_message: undefined,
+    })
 
     /* ─── Poll for status ─── */
     useEffect(() => {
@@ -50,6 +61,13 @@ export default function BrewPage() {
                 setProgress(res.progress)
                 setMessage(res.message)
                 setCurrentTool(res.current_tool || '')
+                setLaunchLinks({
+                    notebook_url: res.notebook_url,
+                    colab_url: res.colab_url,
+                    kaggle_url: res.kaggle_url,
+                    links_ready: res.links_ready,
+                    links_message: res.links_message,
+                })
 
                 if (res.status === 'completed') {
                     setStatus('completed')
@@ -96,7 +114,7 @@ export default function BrewPage() {
                             />
                         )}
                         {status === 'completed' && (
-                            <CompletedView taskId={taskId} />
+                            <CompletedView taskId={taskId} launchLinks={launchLinks} />
                         )}
                         {status === 'failed' && (
                             <FailedView error={error} onRetry={() => router.push('/')} />
@@ -207,13 +225,26 @@ function BrewingView({
 /* ═══════════════════════════════════════════
    Completed State
    ═══════════════════════════════════════════ */
-function CompletedView({ taskId }: { taskId: string }) {
+function CompletedView({
+    taskId,
+    launchLinks,
+}: {
+    taskId: string
+    launchLinks: Pick<ProgressResponse, 'notebook_url' | 'colab_url' | 'kaggle_url' | 'links_ready' | 'links_message'>
+}) {
+    const [downloadError, setDownloadError] = useState('')
+
     const handleDownload = async () => {
-        await downloadNotebook(taskId)
+        try {
+            setDownloadError('')
+            await downloadNotebook(taskId)
+        } catch (error) {
+            setDownloadError(error instanceof Error ? error.message : 'Failed to download notebook')
+        }
     }
 
-    const colabUrl = `https://colab.research.google.com/#create=true`
-    const kaggleUrl = `https://www.kaggle.com/kernels/welcome`
+    const colabUrl = launchLinks.colab_url || 'https://colab.research.google.com/#create=true'
+    const kaggleUrl = launchLinks.kaggle_url || 'https://www.kaggle.com/code/new'
 
     return (
         <motion.div
@@ -239,6 +270,12 @@ function CompletedView({ taskId }: { taskId: string }) {
             <p className="text-muted-foreground mb-10">
                 Your research paper has been transformed into an executable Jupyter notebook.
             </p>
+
+            {launchLinks.links_message && (
+                <p className={`mb-6 text-sm ${launchLinks.links_ready ? 'text-[#1561AD]' : 'text-muted-foreground'}`}>
+                    {launchLinks.links_message}
+                </p>
+            )}
 
             {/* Action Buttons */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-lg mx-auto">
@@ -270,6 +307,10 @@ function CompletedView({ taskId }: { taskId: string }) {
                     </Button>
                 </a>
             </div>
+
+            {downloadError && (
+                <p className="mt-4 text-sm text-destructive">{downloadError}</p>
+            )}
 
             {/* Brew another */}
             <div className="mt-8">

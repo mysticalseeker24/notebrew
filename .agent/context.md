@@ -327,6 +327,9 @@ PDF_VISION_MODEL=google/gemini-3-flash-preview
 | Docling slow + heavy | Deep learning models, GPU needed, Pydantic conflicts | Replaced with Gemini Vision + PyMuPDF4LLM hybrid |
 | shadcn init failed | No `next.config.mjs` for framework detection | Created `next.config.mjs` |
 | `@tailwind` lint warnings | IDE CSS validator doesn't understand Tailwind directives | False positives — works at build time with PostCSS |
+| Brew timeline showed weak step accuracy | Backend status callback did not include active `current_tool` | Added tool-aware telemetry in orchestrator + status response |
+| arXiv tasks could lose parser state context | Orchestrator only mapped `parse_pdf` to `paper_structure` | Added `parse_arxiv` state propagation in orchestrator |
+| Colab/Kaggle actions were generic links | Frontend hardcoded home URLs without generated artifact context | Backend now returns link metadata and frontend consumes it |
 
 ## Version History
 
@@ -351,5 +354,12 @@ PDF_VISION_MODEL=google/gemini-3-flash-preview
 - ✅ Google Fonts: Inter, JetBrains Mono, Space Grotesk
 - ✅ Framer Motion animations: scroll-reveal, spring, shimmer
 - ✅ All pushed to GitHub main branch
-- ⚠️ End-to-end notebook generation needs testing with different papers
-- ⚠️ Colab/Kaggle deep-links need backend endpoint for file hosting
+- ✅ Brew timeline telemetry now includes `current_tool` and `current_section`
+- ✅ `parse_arxiv` now updates agent `paper_structure` state
+- ✅ Metadata model expanded (`doi`, `references`, `key_contributions`, section `key_findings`)
+- ✅ Reusable `FileDropzone` extracted and wired into `UploadCard`
+- ✅ Frontend API error handling improved with backend detail passthrough
+- ✅ Backend now emits launch-link metadata (`notebook_url`, `colab_url`, `kaggle_url`, `links_ready`)
+- ⚠️ True direct Colab/Kaggle deep links require `PUBLIC_NOTEBOOK_BASE_URL` pointing to a public notebook host
+- ✅ Backend validation should be run with `backend/venv` Python (`.\\venv\\Scripts\\python.exe` on Windows)
+- ✅ Runtime check: backend launched from venv and `/health` returned registered tool list
