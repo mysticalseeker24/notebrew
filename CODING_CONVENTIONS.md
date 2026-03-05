@@ -216,23 +216,36 @@ notebrew/
 │   │   ├── main.py            # FastAPI entry point
 │   │   ├── config.py          # Settings & environment
 │   │   ├── models.py          # Pydantic data models
-│   │   ├── agent/             # AI Agent system
-│   │   │   ├── orchestrator.py
-│   │   │   ├── tools/         # Agent tools (Gemini Vision PDF, code gen, etc.)
-│   │   │   └── prompts/       # Prompt templates
-│   │   ├── parsers/           # PDF parsing (Gemini Vision + PyMuPDF4LLM)
-│   │   └── generators/        # Notebook generation
+│   │   ├── llm_client.py      # Shared OpenAI client singleton
+│   │   └── agent/
+│   │       ├── orchestrator.py # Custom tool-calling loop
+│   │       ├── tool_registry.py
+│   │       ├── tools/         # Agent tools (Gemini Vision PDF, code gen, etc.)
+│   │       └── prompts/       # Prompt templates
 │   ├── tests/
 │   ├── requirements.txt
 │   └── .env.example
 ├── frontend/
-│   ├── src/
-│   │   ├── app/               # Next.js pages
-│   │   ├── components/        # React components
-│   │   ├── hooks/             # Custom hooks
-│   │   └── lib/               # Utilities & API
-│   └── package.json
-├── docs/                       # Extended documentation
+│   ├── components.json         # shadcn/ui config
+│   ├── tailwind.config.ts      # Cream Codex theme
+│   ├── postcss.config.js
+│   └── src/
+│       ├── app/
+│       │   ├── page.tsx        # Landing (hero + upload)
+│       │   ├── layout.tsx      # Root layout + fonts
+│       │   ├── globals.css     # CSS variables + animations
+│       │   ├── features/       # Features page
+│       │   └── brew/[id]/      # Brew progress + results
+│       ├── components/
+│       │   ├── Navbar.tsx      # Frosted-glass navbar
+│       │   ├── Hero.tsx        # Animated hero
+│       │   ├── UploadCard.tsx  # PDF/arXiv tabbed upload
+│       │   ├── HowItWorks.tsx  # 6 step feature cards
+│       │   ├── ScrollReveal.tsx# Scroll animation wrapper
+│       │   ├── Footer.tsx      # Minimal footer
+│       │   └── ui/             # shadcn components
+│       └── lib/                # API client + utils
+├── .agent/                     # AI assistant context
 ├── CODING_CONVENTIONS.md
 ├── CONTRIBUTING.md
 ├── README.md
@@ -362,7 +375,7 @@ refactor/<description>    # Code refactoring
 test/<description>        # Adding tests
 ```
 
-Examples: `feature/docling-parser`, `fix/arxiv-download-timeout`
+Examples: `feature/hybrid-parser`, `fix/arxiv-download-timeout`
 
 ### Commit Messages
 
