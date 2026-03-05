@@ -47,6 +47,132 @@ User → Frontend (Next.js 14, port 3000) → FastAPI REST API (port 8001) → A
 - **No frameworks**: Custom agent, no LangChain/LangGraph
 - **LLM access**: OpenRouter API (OpenAI SDK with custom `base_url`)
 
+## Backend Architecture
+
+### API Routes (`main.py`, port 8001)
+
+| Method | Route | Description |
+|--------|-------|-------------|
+| `GET` | `/` | Root — returns welcome message + version |
+| `GET` | `/health` | Health check — returns `{"status": "healthy"}` |
+| `POST` | `/api/upload-pdf` | Upload PDF → creates background task → returns `task_id` |
+| `POST` | `/api/arxiv` | Submit arXiv URL/ID → creates background task → returns `task_id` |
+| `GET` | `/api/status/{task_id}` | Poll task progress (`status`, `progress`, `message`, `current_tool`) |
+| `GET` | `/api/download/{task_id}` | Download generated `.ipynb` file |
+
+Docs: `http://localhost:8001/docs` (Swagger UI)
+
+### Agent Orchestrator (`orchestrator.py`)
+
+The `AgentOrchestrator` class implements the core tool-calling loop:
+
+```
+1. Build system prompt + user task description
+2. Send messages + tool schemas to LLM (Gemini 3 Flash Preview via OpenRouter)
+3. If LLM returns tool_calls:
+   a. Execute each tool via ToolRegistry
+   b. Append tool results to message history
+   c. Emit progress callback (status, progress %, message)
+   d. Loop back to step 2
+4. If LLM returns text (no tool_calls): agent is done
+5. Max iterations: 15 (configurable AGENT_MAX_ITERATIONS)
+```
+
+**Retry & fallback logic** (`_call_llm`):
+- On API error → retry up to `AGENT_MAX_RETRIES` (default: 3)
+- If primary model fails all retries → fall back to `FALLBACK_MODEL` (MiniMax M2.5)
+- `finish_reason=length` handling → truncation recovery with increased `max_tokens` (16384)
+
+**Key methods**:
+- `run(task_description, state)` → main loop
+- `_call_llm(messages, tools)` → single LLM call with retry
+- `_update_state_from_tool(state, result)` → mutates `AgentState` based on tool output
+- `_assistant_msg_to_dict(msg)` → serializes OpenAI response objects
+
+### Agent Tools (6 tools)
+
+| Tool | File | What It Does | LLM/API Used |
+|------|------|-------------|-------------|
+| `parse_pdf` | `tools/parse_pdf.py` | Hybrid PDF parsing (see below) | Gemini Vision + PyMuPDF4LLM |
+| `parse_arxiv` | `tools/parse_arxiv.py` | Downloads paper from arXiv, then calls `parse_pdf` | `arxiv` library |
+| `plan_notebook` | `tools/plan_notebook.py` | Plans notebook structure (cells, sections, framework) | Primary LLM |
+| `generate_code` | `tools/generate_code.py` | Generates PyTorch code for a specific cell | Primary LLM |
+| `validate_code` | `tools/validate_code.py` | `ast.parse()` syntax check + import validation | Local (no LLM) |
+| `assemble_notebook` | `tools/assemble_notebook.py` | Builds `.ipynb` with nbformat | Local (no LLM) |
+
+Each tool exports: `TOOL_SCHEMA` (OpenAI function format) + `execute(**kwargs)` async function.
+
+### Hybrid PDF Parser (`parse_pdf.py`, Approach B)
+
+```
+PDF File
+  ├── Gemini 3 Flash Vision (primary)
+  │   ├── Sends base64 PDF pages as images via OpenRouter multimodal API
+  │   ├── Structured JSON prompt extracts:
+  │   │   ├── metadata (title, authors, abstract)
+  │   │   ├── sections[] (title, content, equations, tables, figures)
+  │   │   ├── equations[] (all LaTeX)
+  │   │   └── references[]
+  │   ├── max_tokens=32768, timeout=120s
+  │   └── Falls back to PyMuPDF4LLM on failure
+  │
+  └── PyMuPDF4LLM (always runs)
+      ├── Extracts full_text (markdown format)
+      ├── Zero cost, offline, fast
+      ├── Uses pymupdf-layout for enhanced layout analysis
+      └── Result merged into PaperStructure.full_text
+```
+
+### Pydantic Data Models (`models.py`)
+
+| Model | Purpose |
+|-------|---------|
+| `ProcessingStatus` | Enum: pending → parsing_pdf → planning → generating_code → validating_code → assembling_notebook → completed/failed |
+| `ArxivRequest` | API input: `arxiv_url`, optional `model` |
+| `NotebookResponse` | API output: `task_id`, `status`, `notebook_url`, `colab_url`, `error` |
+| `ProgressUpdate` | Polling response: `progress` (0-100), `message`, `current_tool` |
+| `PaperSection` | Extracted section: `title`, `content`, `equations[]`, `tables[]`, `figures[]` |
+| `PaperMetadata` | Paper info: `title`, `authors`, `abstract`, `arxiv_id`, `num_pages` |
+| `PaperStructure` | Complete paper: `metadata`, `full_text`, `sections[]`, `equations[]` |
+| `NotebookCellPlan` | Planned cell: `cell_type` (markdown/code), `purpose`, `section_ref` |
+| `NotebookPlan` | Full plan: `title`, `summary`, `framework`, `cells[]`, `dependencies[]` |
+| `ToolCall` | LLM tool request: `id`, `name`, `arguments` |
+| `ToolResult` | Tool response: `tool_call_id`, `name`, `success`, `result`, `error` |
+| `AgentMessage` | Conversation message: `role`, `content`, `tool_calls[]` |
+| `AgentState` | Agent runtime: `paper_structure`, `notebook_plan`, `generated_cells[]`, `notebook_path`, `status` |
+
+All models use `ConfigDict(protected_namespaces=())` for Pydantic v2 compatibility.
+
+### Configuration (`config.py`)
+
+Settings loaded via `pydantic-settings` from `.env` file (with `extra="ignore"` for forward-compat).
+
+Key settings groups:
+- **API Keys**: `OPENROUTER_API_KEY` (required)
+- **Models**: `PRIMARY_MODEL`, `FALLBACK_MODEL`, `GEMINI_3_FLASH_MODEL`, `MINIMAX_M25_MODEL`
+- **Server**: `HOST`, `PORT` (8001), `DEBUG`
+- **Upload**: `MAX_FILE_SIZE_MB` (50), `UPLOAD_DIR`, `OUTPUT_DIR`
+- **Agent**: `AGENT_MAX_ITERATIONS` (15), `AGENT_MAX_RETRIES` (3), `AGENT_TOOL_TIMEOUT` (120s)
+- **PDF Parser**: `PDF_PARSER_PRIMARY` (gemini_vision), `PDF_PARSER_TIMEOUT` (120s), `PDF_MAX_SIZE_MB` (20)
+- **Notebook**: `NOTEBOOK_TIMEOUT` (300s), `MAX_CONTEXT_TOKENS` (100000)
+
+### Dependencies (`requirements.txt`)
+
+```
+fastapi==0.135.1, uvicorn==0.41.0, pydantic==2.12.5, pydantic-settings==2.13.1
+pymupdf4llm==0.3.4, pymupdf-layout==1.27.1
+openai==2.24.0
+nbformat==5.10.4, nbconvert==7.17.0
+arxiv==2.4.0, requests==2.32.5
+python-dotenv==1.2.2, aiofiles==25.1.0, python-multipart==0.0.22
+```
+
+### LLM Client (`llm_client.py`)
+
+Singleton `get_client()` returns a shared `openai.OpenAI` instance configured with:
+- `base_url`: `https://openrouter.ai/api/v1`
+- `api_key`: from `OPENROUTER_API_KEY` env var
+- Connection pooling for concurrent requests
 ## Tech Stack
 
 | Layer    | Technology |
