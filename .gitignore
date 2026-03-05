@@ -51,3 +51,6 @@ htmlcov/
 
 # Build
 *.pyc
+
+# Agent personal notes
+.agent/notes.md
