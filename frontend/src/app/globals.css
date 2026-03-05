@@ -2,18 +2,105 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --foreground-rgb: 0, 0, 0;
-  --background-start-rgb: 214, 219, 220;
-  --background-end-rgb: 255, 255, 255;
+/* ═══════════════════════════════════════════════════════
+   NoteBrew — Cream Codex Design System
+   Immersive Editorial · Research-Grade Aesthetics
+   ═══════════════════════════════════════════════════════ */
+
+@layer base {
+  :root {
+    /* Cream Codex Palette */
+    --background: 36 82% 90%;       /* #FCEED1 — warm cream page */
+    --foreground: 0 0% 15%;          /* #272727 — near-black text */
+
+    --card: 37 40% 85%;             /* #F0E2C8 — warm card surface */
+    --card-foreground: 0 0% 13%;     /* #202020 — rich heading black */
+
+    --popover: 37 40% 85%;
+    --popover-foreground: 0 0% 13%;
+
+    --primary: 210 78% 38%;          /* #1561AD — trustworthy blue */
+    --primary-foreground: 0 0% 98%;  /* white text on blue */
+
+    --secondary: 27 92% 58%;         /* #F7882F — warm apricot */
+    --secondary-foreground: 0 0% 98%;
+
+    --muted: 36 30% 82%;            /* #DDD3BF — soft muted cream */
+    --muted-foreground: 0 0% 44%;    /* #707070 — secondary text */
+
+    --accent: 27 92% 58%;            /* #F7882F — apricot accent */
+    --accent-foreground: 0 0% 98%;
+
+    --destructive: 0 65% 48%;        /* #C94444 — error red */
+    --destructive-foreground: 0 0% 98%;
+
+    --success: 100 42% 55%;          /* #7EBC59 — eco green */
+    --success-foreground: 0 0% 98%;
+
+    --border: 36 20% 77%;           /* #D4C9B5 — warm borders */
+    --input: 36 30% 82%;
+    --ring: 210 78% 38%;             /* blue focus ring */
+
+    --radius: 0.75rem;
+
+    /* Chart colors */
+    --chart-1: 210 78% 38%;
+    --chart-2: 27 92% 58%;
+    --chart-3: 100 42% 55%;
+    --chart-4: 36 40% 65%;
+    --chart-5: 0 65% 48%;
+  }
 }
 
-body {
-  color: rgb(var(--foreground-rgb));
-  background: linear-gradient(
-    to bottom,
-    transparent,
-    rgb(var(--background-end-rgb))
-  )
-  rgb(var(--background-start-rgb));
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-bold tracking-tight;
+    color: hsl(var(--card-foreground));
+  }
+}
+
+/* ─── Custom utilities ─── */
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  /* Shimmer animation for progress bar */
+  @keyframes shimmer {
+    0% { background-position: -500px 0; }
+    100% { background-position: 500px 0; }
+  }
+
+  .animate-shimmer {
+    animation: shimmer 2s infinite linear;
+    background: linear-gradient(
+      90deg,
+      hsl(var(--secondary)) 0%,
+      hsl(var(--secondary) / 0.6) 50%,
+      hsl(var(--secondary)) 100%
+    );
+    background-size: 600px 100%;
+  }
+
+  /* Gentle bounce for scroll indicator */
+  @keyframes gentle-bounce {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(8px); }
+  }
+
+  .animate-gentle-bounce {
+    animation: gentle-bounce 2s ease-in-out infinite;
+  }
 }
