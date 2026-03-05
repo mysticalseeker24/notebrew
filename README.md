@@ -19,7 +19,7 @@ NoteBrew uses a custom AI agent with tool-calling to intelligently parse researc
 - **✅ Code Validation** — Validates generated code for syntax errors before assembly
 - **🔗 arXiv Integration** — Direct support for arXiv papers via URL
 - **📐 LaTeX Rendering** — Extracts and renders mathematical equations
-- **☁️ Colab Ready** — One-click "Open in Colab" functionality
+- **☁️ Export Anywhere** — Download .ipynb, open in Google Colab, or launch in Kaggle
 - **🔧 Extensible** — Easy to add new agent tools
 
 ## 🛠️ Tech Stack
@@ -36,7 +36,10 @@ NoteBrew uses a custom AI agent with tool-calling to intelligently parse researc
 ### Frontend
 - **Next.js 14** — React framework with App Router
 - **TypeScript** — Type-safe development
-- **Tailwind CSS** — Utility-first styling
+- **shadcn/ui** — Accessible component library (Radix-based)
+- **Framer Motion** — Scroll-reveal & spring animations
+- **Tailwind CSS** — Utility-first styling (Cream Codex design system)
+- **Google Fonts** — Inter, JetBrains Mono, Space Grotesk
 
 ## 📋 Prerequisites
 
@@ -151,8 +154,21 @@ notebrew/
 │   └── .env.example
 ├── frontend/
 │   ├── src/
-│   │   ├── app/                     # Next.js pages
-│   │   └── lib/                     # API client
+│   │   ├── app/
+│   │   │   ├── page.tsx              # Landing page (hero + upload)
+│   │   │   ├── layout.tsx            # Root layout + fonts
+│   │   │   ├── globals.css           # Cream Codex design tokens
+│   │   │   ├── features/page.tsx     # Features page
+│   │   │   └── brew/[id]/page.tsx    # Brew progress + results page
+│   │   ├── components/
+│   │   │   ├── Navbar.tsx            # Fixed frosted-glass navbar
+│   │   │   ├── Hero.tsx              # Animated hero section
+│   │   │   ├── UploadCard.tsx        # PDF/arXiv tabbed upload
+│   │   │   ├── HowItWorks.tsx        # 6-step feature cards
+│   │   │   ├── ScrollReveal.tsx      # Scroll animation wrapper
+│   │   │   ├── Footer.tsx            # Minimal footer
+│   │   │   └── ui/                   # shadcn components
+│   │   └── lib/                      # API client
 │   └── package.json
 ├── CODING_CONVENTIONS.md
 ├── CONTRIBUTING.md

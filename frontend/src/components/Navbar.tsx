@@ -22,12 +22,12 @@ export function Navbar() {
 
                 {/* Nav Links */}
                 <div className="flex items-center gap-8">
-                    <a
-                        href="#features"
+                    <Link
+                        href="/features"
                         className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
                     >
                         Features
-                    </a>
+                    </Link>
                     <a
                         href="https://github.com/mysticalseeker24/notebrew"
                         target="_blank"
