@@ -132,7 +132,22 @@ async def parse_pdf(file_path: str) -> dict[str, Any]:
 
     if use_gemini:
         try:
-            structured = await _parse_with_gemini_vision(pdf_bytes, pdf_path.name)
+            page_count = _count_pdf_pages(pdf_bytes)
+            use_chunking = (
+                settings.PDF_CHUNK_ENABLED
+                and page_count >= settings.PDF_CHUNK_MIN_PAGES
+                and settings.PDF_CHUNK_PAGE_SIZE > 0
+            )
+
+            if use_chunking:
+                structured = await _parse_with_gemini_chunks(
+                    pdf_bytes=pdf_bytes,
+                    filename=pdf_path.name,
+                    page_count=page_count,
+                )
+            else:
+                structured = await _parse_with_gemini_vision(pdf_bytes, pdf_path.name)
+
             logger.info(
                 "Gemini Vision: %d sections, %d equations, %d references",
                 len(structured.get("sections", [])),
@@ -157,6 +172,168 @@ async def parse_pdf(file_path: str) -> dict[str, Any]:
     return result
 
 
+def _count_pdf_pages(pdf_bytes: bytes) -> int:
+    """Return page count from raw PDF bytes."""
+    import pymupdf
+
+    with pymupdf.open(stream=pdf_bytes, filetype="pdf") as doc:
+        return int(doc.page_count)
+
+
+def _split_pdf_chunks(pdf_bytes: bytes, page_size: int) -> list[tuple[int, int, bytes]]:
+    """Split PDF bytes into page-based chunk bytes (start_page, end_page, bytes)."""
+    import pymupdf
+
+    chunks: list[tuple[int, int, bytes]] = []
+    with pymupdf.open(stream=pdf_bytes, filetype="pdf") as src:
+        total_pages = src.page_count
+        for start in range(0, total_pages, page_size):
+            end = min(start + page_size, total_pages)
+            out = pymupdf.open()
+            out.insert_pdf(src, from_page=start, to_page=end - 1)
+            chunk_bytes = out.tobytes()
+            out.close()
+            chunks.append((start + 1, end, chunk_bytes))
+    return chunks
+
+
+async def _parse_with_gemini_chunks(
+    pdf_bytes: bytes,
+    filename: str,
+    page_count: int,
+) -> dict[str, Any]:
+    """Parse long PDFs in concurrent page chunks and merge structured outputs."""
+    chunk_size = max(1, settings.PDF_CHUNK_PAGE_SIZE)
+    chunks = _split_pdf_chunks(pdf_bytes, chunk_size)
+    if len(chunks) <= 1:
+        return await _parse_with_gemini_vision(pdf_bytes, filename)
+
+    logger.info(
+        "Chunked Gemini parse enabled: %d pages split into %d chunks (size=%d)",
+        page_count,
+        len(chunks),
+        chunk_size,
+    )
+
+    semaphore = asyncio.Semaphore(max(1, settings.PDF_CHUNK_MAX_CONCURRENCY))
+
+    async def _run_chunk(
+        index: int,
+        start_page: int,
+        end_page: int,
+        chunk_pdf_bytes: bytes,
+    ) -> tuple[int, dict[str, Any]]:
+        async with semaphore:
+            result = await _parse_with_gemini_vision(
+                chunk_pdf_bytes,
+                f"{filename} [pages {start_page}-{end_page}]",
+                chunk_hint=(start_page, end_page, page_count),
+            )
+            return index, result
+
+    tasks = [
+        _run_chunk(i, start, end, chunk_bytes)
+        for i, (start, end, chunk_bytes) in enumerate(chunks)
+    ]
+    results = await asyncio.gather(*tasks)
+    ordered = [r for _, r in sorted(results, key=lambda item: item[0])]
+    return _merge_chunk_results(ordered, filename, page_count)
+
+
+def _dedupe_preserve_order(values: list[str]) -> list[str]:
+    """De-duplicate non-empty strings preserving order."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for value in values:
+        text = (value or "").strip()
+        if not text:
+            continue
+        key = text.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(text)
+    return out
+
+
+def _merge_chunk_results(
+    chunk_results: list[dict[str, Any]],
+    filename: str,
+    page_count: int,
+) -> dict[str, Any]:
+    """Merge chunk-level Gemini structures into one normalized paper structure."""
+    if not chunk_results:
+        return _normalize_gemini_response({}, filename)
+
+    metadata = {
+        "title": "",
+        "authors": [],
+        "abstract": "",
+        "num_pages": page_count,
+        "published_date": None,
+        "doi": None,
+        "source": "pdf_upload",
+    }
+
+    section_signatures: set[str] = set()
+    sections: list[dict[str, Any]] = []
+    all_equations: list[str] = []
+    all_references: list[dict[str, Any]] = []
+    all_contributions: list[str] = []
+
+    for item in chunk_results:
+        md = item.get("metadata", {}) or {}
+        if not metadata["title"] and md.get("title"):
+            metadata["title"] = md.get("title")
+        if not metadata["abstract"] and md.get("abstract"):
+            metadata["abstract"] = md.get("abstract")
+        if not metadata["doi"] and md.get("doi"):
+            metadata["doi"] = md.get("doi")
+        if not metadata["published_date"] and md.get("published_date"):
+            metadata["published_date"] = md.get("published_date")
+
+        metadata["authors"] = _dedupe_preserve_order(
+            list(metadata.get("authors", [])) + list(md.get("authors", []))
+        )
+
+        for section in item.get("sections", []) or []:
+            title = str(section.get("title", "")).strip()
+            content = str(section.get("content", "")).strip()
+            signature = f"{title.lower()}::{content[:200].lower()}"
+            if signature in section_signatures:
+                continue
+            section_signatures.add(signature)
+            sections.append(section)
+
+        all_equations.extend(item.get("equations", []) or [])
+        all_references.extend(item.get("references", []) or [])
+        all_contributions.extend(item.get("key_contributions", []) or [])
+
+    if not metadata["title"]:
+        metadata["title"] = Path(filename).stem
+
+    # Deduplicate references by serialized identity.
+    unique_refs: list[dict[str, Any]] = []
+    seen_ref_keys: set[str] = set()
+    for ref in all_references:
+        if not isinstance(ref, dict):
+            continue
+        key = json.dumps(ref, sort_keys=True, ensure_ascii=True)
+        if key in seen_ref_keys:
+            continue
+        seen_ref_keys.add(key)
+        unique_refs.append(ref)
+
+    return {
+        "metadata": metadata,
+        "full_text": "",
+        "sections": sections,
+        "equations": _dedupe_preserve_order(all_equations),
+        "references": unique_refs,
+        "key_contributions": _dedupe_preserve_order(all_contributions),
+    }
+
+
 # ---------------------------------------------------------------------------
 # PyMuPDF4LLM: fast full-text extraction (always runs)
 # ---------------------------------------------------------------------------
@@ -179,6 +356,7 @@ async def _extract_full_text_pymupdf(pdf_path: Path) -> str:
 # ---------------------------------------------------------------------------
 async def _parse_with_gemini_vision(
     pdf_bytes: bytes, filename: str,
+    chunk_hint: tuple[int, int, int] | None = None,
 ) -> dict[str, Any]:
     """Send the PDF to Gemini 3 Flash for structured extraction.
 
@@ -190,6 +368,15 @@ async def _parse_with_gemini_vision(
     client = get_client()
 
     logger.info("Sending PDF to Gemini Vision (%s)...", settings.PDF_VISION_MODEL)
+
+    prompt = EXTRACTION_PROMPT
+    if chunk_hint:
+        start_page, end_page, total_pages = chunk_hint
+        prompt = (
+            f"This document is pages {start_page}-{end_page} of {total_pages}. "
+            "Extract JSON for only the visible chunk content.\n\n"
+            f"{EXTRACTION_PROMPT}"
+        )
 
     response = await asyncio.wait_for(
         client.chat.completions.create(
@@ -206,7 +393,7 @@ async def _parse_with_gemini_vision(
                         },
                         {
                             "type": "text",
-                            "text": EXTRACTION_PROMPT,
+                            "text": prompt,
                         },
                     ],
                 }

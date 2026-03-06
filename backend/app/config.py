@@ -66,6 +66,10 @@ class Settings(BaseSettings):
     PDF_PARSER_TIMEOUT: int = 120                 # seconds for Gemini API call
     PDF_MAX_SIZE_MB: int = 20                     # max PDF size for Gemini vision
     PDF_VISION_MODEL: str = "google/gemini-3-flash-preview"  # model for PDF parsing
+    PDF_CHUNK_ENABLED: bool = True
+    PDF_CHUNK_PAGE_SIZE: int = 5
+    PDF_CHUNK_MIN_PAGES: int = 10
+    PDF_CHUNK_MAX_CONCURRENCY: int = 3
 
     # Notebook planning limits (Phase 1 speed controls)
     MAX_NOTEBOOK_CELLS: int = 12
