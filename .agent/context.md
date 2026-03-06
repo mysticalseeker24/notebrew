@@ -24,6 +24,7 @@
 - **Frontend Version**: `2.0.0` (read from `frontend/package.json`)
 - **License**: MIT
 - **Author**: Saksham Mishra (@mysticalseeker24)
+- **Current AI Agent**: Gemini 3.1 Pro
 
 ## Architecture
 
@@ -306,7 +307,7 @@ PDF_VISION_MODEL=google/gemini-3-flash-preview
 ## Key Design Decisions
 
 1. **Custom agent over LangGraph** — More control, no framework lock-in, lighter weight
-2. **Gemini Vision over Docling** — Cloud-based vision parsing, zero GPU needed, best accuracy
+2. **Gemini Vision** — Cloud-based vision parsing, zero GPU needed, best accuracy
 3. **PyMuPDF4LLM fallback** — Lightweight offline fallback when API unavailable or PDF too large
 4. **Shared LLM client** — Singleton `get_client()` in `llm_client.py` with connection pooling
 5. **Base64 PDF passthrough** — PDFs sent to Gemini via OpenRouter multimodal API
@@ -324,7 +325,7 @@ PDF_VISION_MODEL=google/gemini-3-flash-preview
 | 401 Missing Auth | Stale `OPENROUTER_API_KEY` env var overriding `.env` | Clear env var: `Remove-Item Env:OPENROUTER_API_KEY` |
 | `finish_reason=length` loop | max_tokens=4096 too small for tool calls | Increased to 16384, added truncation recovery |
 | Pydantic `class Config` deprecation | Old v1 syntax | Use `model_config = SettingsConfigDict(...)` |
-| Docling slow + heavy | Deep learning models, GPU needed, Pydantic conflicts | Replaced with Gemini Vision + PyMuPDF4LLM hybrid |
+
 | shadcn init failed | No `next.config.mjs` for framework detection | Created `next.config.mjs` |
 | `@tailwind` lint warnings | IDE CSS validator doesn't understand Tailwind directives | False positives — works at build time with PostCSS |
 | Brew timeline showed weak step accuracy | Backend status callback did not include active `current_tool` | Added tool-aware telemetry in orchestrator + status response |
