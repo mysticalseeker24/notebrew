@@ -369,3 +369,4 @@ PDF_VISION_MODEL=google/gemini-3-flash-preview
 - ✅ Phase 1 Step 3: orchestrator budget guards added (`MAX_LLM_CALLS_PER_TASK`, `MAX_GENERATE_CODE_CALLS`, `MAX_RUNTIME_SECONDS`, `MAX_RETRY_PER_TOOL`) with explicit fail-fast status messages
 - ✅ Phase 1 Step 4: deterministic orchestrator fanout added after planning (`generate_code` in parallel, bounded retries, code validation, then direct notebook assembly)
 - ✅ Phase 1 Step 5: chunked PDF processing added for long documents (concurrent Gemini chunk extraction with merged sections/equations/references)
+- ✅ Phase 1 Step 6: notebook quality prompts upgraded for interactivity and learning effectiveness (interactive experiment cells, learner checkpoints, compact tweakable config patterns)

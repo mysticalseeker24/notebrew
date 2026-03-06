@@ -99,6 +99,9 @@ async def assemble_notebook(
     # --- Setup cell ---
     nb.cells.append(new_code_cell(_setup_code(deps)))
 
+    # --- Learning usage guide ---
+    nb.cells.append(new_markdown_cell(_learning_guide_markdown()))
+
     # --- Generated cells ---
     for cell_data in cells:
         cell_type = cell_data.get("cell_type", "code")
@@ -195,6 +198,11 @@ import torch.nn.functional as F
 import numpy as np
 import matplotlib.pyplot as plt
 
+try:
+    import ipywidgets as widgets
+except Exception:
+    widgets = None
+
 from typing import List, Tuple, Optional
 
 # Reproducibility
@@ -205,6 +213,38 @@ np.random.seed(42)
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f'Using device: {{device}}')
 print(f'PyTorch version: {{torch.__version__}}')
+
+# Interactive defaults learners can tweak quickly in later cells
+interactive_config = {
+    "batch_size": 8,
+    "learning_rate": 1e-3,
+    "hidden_dim": 64,
+    "epochs": 3,
+}
+print("Interactive config:", interactive_config)
+
+if widgets is not None:
+    print("ipywidgets available: sliders/interact can be used in this notebook.")
+else:
+    print("ipywidgets not installed: interactive cells can still run with manual config edits.")
+"""
+
+
+def _learning_guide_markdown() -> str:
+    """Generate an onboarding cell to improve notebook learnability."""
+    return """## How to Learn With This Notebook
+
+Use this notebook as an interactive walkthrough, not just a script dump.
+
+1. Run cells top-to-bottom once to establish baseline behavior.
+2. Change values in `interactive_config` and rerun experiment cells.
+3. Compare metrics/plots after each change and note what shifted.
+4. Use the markdown checkpoint questions to verify understanding.
+
+### Suggested First Experiments
+- Halve and double `learning_rate`.
+- Increase `hidden_dim` from 64 to 128.
+- Increase `epochs` from 3 to 10 and observe overfitting signals.
 """
 
 
