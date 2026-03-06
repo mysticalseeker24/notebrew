@@ -63,13 +63,13 @@ async def plan_notebook(paper_data: dict[str, Any]) -> dict[str, Any]:
 
     # Build sections summary
     sections_summary = "\n".join(
-        f"- **{s['title']}**: {s['content'][:200]}..."
+        f"- **{s['title']}**: {s['content'][:120]}..."
         for s in sections
     )
 
     # Build equations summary
     equations_summary = (
-        "\n".join(f"- ${eq}$" for eq in equations[:15])
+        "\n".join(f"- ${eq}$" for eq in equations[:8])
         if equations
         else "No equations found."
     )
@@ -98,7 +98,7 @@ async def plan_notebook(paper_data: dict[str, Any]) -> dict[str, Any]:
             {"role": "user", "content": prompt},
         ],
         temperature=0.2,
-        max_tokens=2000,
+        max_tokens=900,
     )
 
     content = response.choices[0].message.content or "{}"

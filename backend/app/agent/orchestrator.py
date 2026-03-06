@@ -420,8 +420,18 @@ class AgentOrchestrator:
         }
 
         calls: list[dict[str, Any]] = []
+        prebuilt_cells: dict[int, dict[str, Any]] = {}
         for idx, cell in enumerate(plan.cells):
             section = section_map.get(cell.section_ref or "")
+            if str(cell.cell_type).lower() == "markdown":
+                prebuilt_cells[idx] = self._build_fast_markdown_cell(
+                    purpose=cell.purpose,
+                    section_title=cell.section_ref or "",
+                    section_content=(section.content if section else ""),
+                    equations=(section.equations if section else paper.equations[:3]),
+                )
+                continue
+
             calls.append(
                 {
                     "name": "generate_code",
@@ -432,30 +442,30 @@ class AgentOrchestrator:
                         "paper_title": paper.metadata.title,
                         "section_title": cell.section_ref or "",
                         "section_content": (section.content if section else ""),
-                        "equations": (section.equations if section else paper.equations[:6]),
-                        "previous_code_context": "Parallel generation mode: keep outputs concise and notebook-ready.",
+                        "equations": (section.equations if section else paper.equations[:4]),
+                        "previous_code_context": "Fast mode: concise runnable code only.",
                     },
                 }
             )
 
-        if not calls:
+        if not calls and not prebuilt_cells:
             state.error = "Notebook plan has no cells to generate."
             return False
 
         self._emit_progress(
             ProcessingStatus.GENERATING_CODE.value,
             75,
-            f"Generating {len(calls)} planned cells in parallel...",
+            f"Generating {len(calls)} code cells in parallel...",
             current_tool="generate_code",
         )
-        generated = await self._execute_tool_calls_with_retries(calls)
+        generated = await self._execute_tool_calls_with_retries(calls) if calls else []
 
         failed = [r for r in generated if not r.success]
         if failed:
             state.error = f"Parallel generation failed for '{failed[0].name}': {failed[0].error}"
             return False
 
-        generated_by_index: dict[int, dict[str, Any]] = {}
+        generated_by_index: dict[int, dict[str, Any]] = dict(prebuilt_cells)
         dependency_set: set[str] = set(plan.dependencies)
         for result in generated:
             idx = int(str(result.tool_call_id).split("-")[-1])
@@ -533,3 +543,45 @@ class AgentOrchestrator:
 
         self._update_state_from_tool(state, assembled)
         return bool(state.notebook_path)
+
+    @staticmethod
+    def _build_fast_markdown_cell(
+        purpose: str,
+        section_title: str,
+        section_content: str,
+        equations: list[str],
+    ) -> dict[str, Any]:
+        """Create concise markdown locally to avoid extra LLM latency."""
+        title = section_title.strip() or "Explanation"
+        summary = (section_content or "").strip().replace("\n", " ")
+        summary = " ".join(summary.split())
+        if len(summary) > 420:
+            summary = summary[:420].rstrip() + "..."
+
+        lines = [
+            f"## {title}",
+            "",
+            f"**Goal:** {purpose}",
+            "",
+            summary or "Key ideas from this section are summarized for quick understanding.",
+        ]
+
+        if equations:
+            lines.extend([
+                "",
+                "**Key equation:**",
+                f"$${equations[0]}$$",
+            ])
+
+        lines.extend([
+            "",
+            "**What to observe:** Focus on how this section connects to the runnable cells below.",
+        ])
+
+        return {
+            "cell_type": "markdown",
+            "content": "\n".join(lines),
+            "purpose": purpose,
+            "section_ref": section_title,
+            "dependencies": [],
+        }

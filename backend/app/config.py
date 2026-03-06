@@ -58,7 +58,7 @@ class Settings(BaseSettings):
     AGENT_TOOL_TIMEOUT: int = 120  # seconds per tool execution
     MAX_LLM_CALLS_PER_TASK: int = 20
     MAX_GENERATE_CODE_CALLS: int = 8
-    MAX_RUNTIME_SECONDS: int = 240
+    MAX_RUNTIME_SECONDS: int = 120
     MAX_RETRY_PER_TOOL: int = 2
 
     # PDF Parser Configuration
@@ -72,8 +72,8 @@ class Settings(BaseSettings):
     PDF_CHUNK_MAX_CONCURRENCY: int = 3
 
     # Notebook planning limits (Phase 1 speed controls)
-    MAX_NOTEBOOK_CELLS: int = 12
-    MAX_NOTEBOOK_CODE_CELLS: int = 6
+    MAX_NOTEBOOK_CELLS: int = 8
+    MAX_NOTEBOOK_CODE_CELLS: int = 3
 
     # Notebook launch links and hosting
     PUBLIC_NOTEBOOK_BASE_URL: str = ""

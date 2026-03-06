@@ -215,12 +215,12 @@ print(f'Using device: {{device}}')
 print(f'PyTorch version: {{torch.__version__}}')
 
 # Interactive defaults learners can tweak quickly in later cells
-interactive_config = {
+interactive_config = {{
     "batch_size": 8,
     "learning_rate": 1e-3,
     "hidden_dim": 64,
     "epochs": 3,
-}
+}}
 print("Interactive config:", interactive_config)
 
 if widgets is not None:

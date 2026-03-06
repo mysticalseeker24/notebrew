@@ -371,3 +371,7 @@ PDF_VISION_MODEL=google/gemini-3-flash-preview
 - ✅ Phase 1 Step 5: chunked PDF processing added for long documents (concurrent Gemini chunk extraction with merged sections/equations/references)
 - ✅ Phase 1 Step 6: notebook quality prompts upgraded for interactivity and learning effectiveness (interactive experiment cells, learner checkpoints, compact tweakable config patterns)
 - ✅ OpenRouter MiniMax model path corrected to `minimax/minimax-m2.5` (replaces invalid `minimaxai/minimax-m2.5`)
+- ✅ Sub-60s tuning pass: reduced default runtime/cell budgets (`MAX_RUNTIME_SECONDS=120`, `MAX_NOTEBOOK_CELLS=8`, `MAX_NOTEBOOK_CODE_CELLS=3`)
+- ✅ Deterministic fanout optimized: markdown cells are now synthesized locally (no LLM call), while only code cells call `generate_code`
+- ✅ Planning/codegen token budgets tightened for lower latency (`plan_notebook max_tokens=900`, `generate_code max_tokens=1200`)
+- ✅ Notebook assembly f-string brace bug fixed in setup scaffold (`interactive_config` braces escaped)

@@ -105,16 +105,16 @@ async def generate_code(
         prompt = GENERATE_CODE_PROMPT.format(
             title=paper_title,
             section_title=section_title or "General",
-            section_content=section_content[:3000] if section_content else "N/A",
+            section_content=section_content[:1600] if section_content else "N/A",
             equations=equations_str,
-            previous_code_context=previous_code_context[:2000] if previous_code_context else "This is the first code cell.",
+            previous_code_context=previous_code_context[:700] if previous_code_context else "This is the first code cell.",
             cell_purpose=cell_purpose,
         )
     else:
         prompt = GENERATE_MARKDOWN_PROMPT.format(
             title=paper_title,
             section_title=section_title or "General",
-            section_content=section_content[:3000] if section_content else "N/A",
+            section_content=section_content[:1200] if section_content else "N/A",
             equations=equations_str,
             cell_purpose=cell_purpose,
         )
@@ -136,8 +136,8 @@ async def generate_code(
             {"role": "system", "content": system_msg},
             {"role": "user", "content": prompt},
         ],
-        temperature=0.3,
-        max_tokens=4000,
+        temperature=0.2,
+        max_tokens=1200,
     )
 
     content = response.choices[0].message.content or ""
