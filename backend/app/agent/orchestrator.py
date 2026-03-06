@@ -206,6 +206,24 @@ class AgentOrchestrator:
                     self._emit_progress(state.status.value, 0, state.error, current_tool=first_error.name)
                     return state
 
+                ran_plan = any(r.success and r.name == "plan_notebook" for r in results)
+                ran_generate = any(r.success and r.name == "generate_code" for r in results)
+                if ran_plan and not ran_generate:
+                    fanout_ok = await self._run_deterministic_generation_pipeline(state)
+                    if fanout_ok:
+                        state.status = ProcessingStatus.COMPLETED
+                        self._emit_progress(
+                            ProcessingStatus.COMPLETED.value,
+                            100,
+                            "Notebook generation complete",
+                            current_tool="assemble_notebook",
+                        )
+                        return state
+                    if state.error:
+                        state.status = ProcessingStatus.FAILED
+                        self._emit_progress(state.status.value, 0, state.error, current_tool="generate_code")
+                        return state
+
                 continue
 
             # ----- Case 2: Final text response -----
@@ -384,3 +402,134 @@ class AgentOrchestrator:
         elif tool_name == "assemble_notebook" and isinstance(data, dict):
             state.notebook_path = data.get("notebook_path")
             state.status = ProcessingStatus.ASSEMBLING_NOTEBOOK
+
+    async def _run_deterministic_generation_pipeline(self, state: AgentState) -> bool:
+        """Generate planned cells in parallel and assemble notebook deterministically."""
+        if not state.notebook_plan:
+            state.error = "Notebook plan unavailable for deterministic generation."
+            return False
+
+        if not state.paper_structure:
+            state.error = "Paper structure unavailable for deterministic generation."
+            return False
+
+        plan = state.notebook_plan
+        paper = state.paper_structure
+        section_map = {
+            sec.title: sec for sec in paper.sections
+        }
+
+        calls: list[dict[str, Any]] = []
+        for idx, cell in enumerate(plan.cells):
+            section = section_map.get(cell.section_ref or "")
+            calls.append(
+                {
+                    "name": "generate_code",
+                    "tool_call_id": f"fanout-generate-{idx}",
+                    "arguments": {
+                        "cell_type": cell.cell_type,
+                        "cell_purpose": cell.purpose,
+                        "paper_title": paper.metadata.title,
+                        "section_title": cell.section_ref or "",
+                        "section_content": (section.content if section else ""),
+                        "equations": (section.equations if section else paper.equations[:6]),
+                        "previous_code_context": "Parallel generation mode: keep outputs concise and notebook-ready.",
+                    },
+                }
+            )
+
+        if not calls:
+            state.error = "Notebook plan has no cells to generate."
+            return False
+
+        self._emit_progress(
+            ProcessingStatus.GENERATING_CODE.value,
+            75,
+            f"Generating {len(calls)} planned cells in parallel...",
+            current_tool="generate_code",
+        )
+        generated = await self._execute_tool_calls_with_retries(calls)
+
+        failed = [r for r in generated if not r.success]
+        if failed:
+            state.error = f"Parallel generation failed for '{failed[0].name}': {failed[0].error}"
+            return False
+
+        generated_by_index: dict[int, dict[str, Any]] = {}
+        dependency_set: set[str] = set(plan.dependencies)
+        for result in generated:
+            idx = int(str(result.tool_call_id).split("-")[-1])
+            payload = result.result if isinstance(result.result, dict) else {}
+            generated_by_index[idx] = payload
+            for dep in payload.get("dependencies", []) or []:
+                if isinstance(dep, str) and dep.strip():
+                    dependency_set.add(dep.strip())
+
+        ordered_cells = [generated_by_index[i] for i in sorted(generated_by_index.keys())]
+        state.generated_cells = ordered_cells
+
+        # Validate generated code cells before notebook assembly.
+        code_validate_calls: list[dict[str, Any]] = []
+        for idx, cell in enumerate(ordered_cells):
+            if str(cell.get("cell_type", "")).lower() != "code":
+                continue
+            code_validate_calls.append(
+                {
+                    "name": "validate_code",
+                    "tool_call_id": f"fanout-validate-{idx}",
+                    "arguments": {
+                        "code": cell.get("content", ""),
+                        "cell_index": idx,
+                    },
+                }
+            )
+
+        if code_validate_calls:
+            self._emit_progress(
+                ProcessingStatus.VALIDATING_CODE.value,
+                85,
+                "Validating generated code cells...",
+                current_tool="validate_code",
+            )
+            validations = await self._execute_tool_calls_with_retries(code_validate_calls)
+            invalid = [
+                r for r in validations
+                if not r.success or not bool((r.result or {}).get("is_valid", False))
+            ]
+            if invalid:
+                first = invalid[0]
+                state.error = (
+                    f"Generated code validation failed for {first.tool_call_id}: "
+                    f"{first.error or (first.result or {}).get('errors', ['unknown'])[0]}"
+                )
+                return False
+
+        assemble_call = {
+            "name": "assemble_notebook",
+            "tool_call_id": "fanout-assemble",
+            "arguments": {
+                "title": plan.title,
+                "authors": paper.metadata.authors,
+                "cells": ordered_cells,
+                "dependencies": sorted(dependency_set),
+            },
+        }
+
+        self._emit_progress(
+            ProcessingStatus.ASSEMBLING_NOTEBOOK.value,
+            95,
+            "Assembling notebook artifact...",
+            current_tool="assemble_notebook",
+        )
+        assembled = await self.registry.execute(
+            tool_name=assemble_call["name"],
+            arguments=assemble_call["arguments"],
+            tool_call_id=assemble_call["tool_call_id"],
+        )
+
+        if not assembled.success:
+            state.error = f"Failed to assemble notebook: {assembled.error}"
+            return False
+
+        self._update_state_from_tool(state, assembled)
+        return bool(state.notebook_path)
