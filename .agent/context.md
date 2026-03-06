@@ -375,3 +375,5 @@ PDF_VISION_MODEL=google/gemini-3-flash-preview
 - ✅ Deterministic fanout optimized: markdown cells are now synthesized locally (no LLM call), while only code cells call `generate_code`
 - ✅ Planning/codegen token budgets tightened for lower latency (`plan_notebook max_tokens=900`, `generate_code max_tokens=1200`)
 - ✅ Notebook assembly f-string brace bug fixed in setup scaffold (`interactive_config` braces escaped)
+- ✅ Planner hardening: non-object JSON outputs now fallback safely to `_fallback_plan` instead of runtime failure
+- ✅ Validation brittleness fix: deterministic fanout now retries only failed code cells (regenerate + revalidate) instead of aborting the entire notebook run

@@ -507,12 +507,21 @@ class AgentOrchestrator:
                 if not r.success or not bool((r.result or {}).get("is_valid", False))
             ]
             if invalid:
-                first = invalid[0]
-                state.error = (
-                    f"Generated code validation failed for {first.tool_call_id}: "
-                    f"{first.error or (first.result or {}).get('errors', ['unknown'])[0]}"
+                fixed_ok = await self._retry_invalid_code_cells(
+                    invalid_results=invalid,
+                    ordered_cells=ordered_cells,
+                    plan=plan,
+                    paper=paper,
+                    section_map=section_map,
+                    dependency_set=dependency_set,
                 )
-                return False
+                if not fixed_ok:
+                    first = invalid[0]
+                    state.error = (
+                        f"Generated code validation failed for {first.tool_call_id}: "
+                        f"{first.error or (first.result or {}).get('errors', ['unknown'])[0]}"
+                    )
+                    return False
 
         assemble_call = {
             "name": "assemble_notebook",
@@ -543,6 +552,97 @@ class AgentOrchestrator:
 
         self._update_state_from_tool(state, assembled)
         return bool(state.notebook_path)
+
+    async def _retry_invalid_code_cells(
+        self,
+        invalid_results: list[Any],
+        ordered_cells: list[dict[str, Any]],
+        plan: Any,
+        paper: Any,
+        section_map: dict[str, Any],
+        dependency_set: set[str],
+    ) -> bool:
+        """Regenerate only failed code cells and revalidate each one individually."""
+        retries = max(0, settings.CODE_CELL_REGEN_RETRIES)
+        if retries == 0:
+            return False
+
+        invalid_indexes: list[int] = []
+        for result in invalid_results:
+            try:
+                invalid_indexes.append(int(str(result.tool_call_id).split("-")[-1]))
+            except Exception:
+                continue
+
+        invalid_indexes = sorted(set(i for i in invalid_indexes if 0 <= i < len(ordered_cells)))
+        if not invalid_indexes:
+            return False
+
+        self._emit_progress(
+            ProcessingStatus.GENERATING_CODE.value,
+            88,
+            f"Retrying {len(invalid_indexes)} failed code cell(s)...",
+            current_tool="generate_code",
+        )
+
+        for attempt in range(1, retries + 1):
+            still_invalid: list[int] = []
+            for idx in invalid_indexes:
+                plan_cell = plan.cells[idx] if idx < len(plan.cells) else None
+                if plan_cell is None:
+                    still_invalid.append(idx)
+                    continue
+
+                section = section_map.get(plan_cell.section_ref or "")
+                regen_call = {
+                    "name": "generate_code",
+                    "tool_call_id": f"fanout-regen-{attempt}-{idx}",
+                    "arguments": {
+                        "cell_type": plan_cell.cell_type,
+                        "cell_purpose": plan_cell.purpose,
+                        "paper_title": paper.metadata.title,
+                        "section_title": plan_cell.section_ref or "",
+                        "section_content": (section.content if section else ""),
+                        "equations": (section.equations if section else paper.equations[:4]),
+                        "previous_code_context": "Retry mode: prioritize syntactic correctness and concise runnable code.",
+                    },
+                }
+
+                regen_result = await self._execute_tool_calls_with_retries([regen_call])
+                if not regen_result or not regen_result[0].success:
+                    still_invalid.append(idx)
+                    continue
+
+                payload = regen_result[0].result if isinstance(regen_result[0].result, dict) else {}
+                validate_call = {
+                    "name": "validate_code",
+                    "tool_call_id": f"fanout-validate-regen-{attempt}-{idx}",
+                    "arguments": {
+                        "code": payload.get("content", ""),
+                        "cell_index": idx,
+                    },
+                }
+                validation = await self._execute_tool_calls_with_retries([validate_call])
+                valid = bool(
+                    validation
+                    and validation[0].success
+                    and bool((validation[0].result or {}).get("is_valid", False))
+                )
+                if not valid:
+                    still_invalid.append(idx)
+                    continue
+
+                ordered_cells[idx] = payload
+                for dep in payload.get("dependencies", []) or []:
+                    if isinstance(dep, str) and dep.strip():
+                        dependency_set.add(dep.strip())
+
+            if not still_invalid:
+                return True
+
+            invalid_indexes = still_invalid
+
+        return False
 
     @staticmethod
     def _build_fast_markdown_cell(

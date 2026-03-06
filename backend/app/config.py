@@ -60,6 +60,7 @@ class Settings(BaseSettings):
     MAX_GENERATE_CODE_CALLS: int = 8
     MAX_RUNTIME_SECONDS: int = 120
     MAX_RETRY_PER_TOOL: int = 2
+    CODE_CELL_REGEN_RETRIES: int = 1
 
     # PDF Parser Configuration
     PDF_PARSER_PRIMARY: str = "gemini_vision"     # "gemini_vision" or "pymupdf"
