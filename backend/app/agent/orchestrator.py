@@ -41,7 +41,7 @@ class AgentOrchestrator:
         ] = None,
     ) -> None:
         self.registry = tool_registry
-        self.model = model or settings.PRIMARY_MODEL
+        self.model = model or settings.ORCHESTRATION_MODEL
         self.on_progress = on_progress
         self.max_iterations = settings.AGENT_MAX_ITERATIONS
         self.max_retries = settings.AGENT_MAX_RETRIES
@@ -53,7 +53,7 @@ class AgentOrchestrator:
             "gemini-3-flash-preview": settings.GEMINI_3_FLASH_MODEL,
             "minimax-m2.5": settings.MINIMAX_M25_MODEL,
         }
-        return mapping.get(self.model, settings.GEMINI_3_FLASH_MODEL)
+        return mapping.get(self.model, self.model)
 
     @staticmethod
     def _status_for_tool(tool_name: str) -> str:

@@ -12,6 +12,15 @@ from app.agent.prompts.templates import GENERATE_CODE_PROMPT, GENERATE_MARKDOWN_
 
 logger = logging.getLogger(__name__)
 
+
+def _resolve_model_name(model_name: str) -> str:
+    """Resolve short model names to full OpenRouter paths."""
+    mapping = {
+        "gemini-3-flash-preview": settings.GEMINI_3_FLASH_MODEL,
+        "minimax-m2.5": settings.MINIMAX_M25_MODEL,
+    }
+    return mapping.get(model_name, model_name)
+
 # Tool schema for the agent
 TOOL_SCHEMA = {
     "name": "generate_code",
@@ -122,7 +131,7 @@ async def generate_code(
     )
 
     response = await client.chat.completions.create(
-        model=settings.GEMINI_3_FLASH_MODEL,
+        model=_resolve_model_name(settings.CODEGEN_MODEL),
         messages=[
             {"role": "system", "content": system_msg},
             {"role": "user", "content": prompt},

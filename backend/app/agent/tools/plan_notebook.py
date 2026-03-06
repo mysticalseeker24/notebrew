@@ -12,6 +12,15 @@ from app.agent.prompts.templates import PLAN_NOTEBOOK_PROMPT
 
 logger = logging.getLogger(__name__)
 
+
+def _resolve_model_name(model_name: str) -> str:
+    """Resolve short model names to full OpenRouter paths."""
+    mapping = {
+        "gemini-3-flash-preview": settings.GEMINI_3_FLASH_MODEL,
+        "minimax-m2.5": settings.MINIMAX_M25_MODEL,
+    }
+    return mapping.get(model_name, model_name)
+
 # Tool schema for the agent
 TOOL_SCHEMA = {
     "name": "plan_notebook",
@@ -77,7 +86,7 @@ async def plan_notebook(paper_data: dict[str, Any]) -> dict[str, Any]:
     client = get_client()
 
     response = await client.chat.completions.create(
-        model=settings.GEMINI_3_FLASH_MODEL,
+        model=_resolve_model_name(settings.PLANNING_MODEL),
         messages=[
             {
                 "role": "system",

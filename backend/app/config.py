@@ -23,6 +23,15 @@ class Settings(BaseSettings):
     FALLBACK_MODEL: Literal[
         "gemini-3-flash-preview", "minimax-m2.5"
     ] = "minimax-m2.5"
+    ORCHESTRATION_MODEL: Literal[
+        "gemini-3-flash-preview", "minimax-m2.5"
+    ] = "minimax-m2.5"
+    PLANNING_MODEL: Literal[
+        "gemini-3-flash-preview", "minimax-m2.5"
+    ] = "minimax-m2.5"
+    CODEGEN_MODEL: Literal[
+        "gemini-3-flash-preview", "minimax-m2.5"
+    ] = "minimax-m2.5"
 
     # OpenRouter Configuration
     OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
