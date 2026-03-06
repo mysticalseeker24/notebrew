@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from typing import Any, Callable, Optional
 
 import openai
@@ -45,6 +46,10 @@ class AgentOrchestrator:
         self.on_progress = on_progress
         self.max_iterations = settings.AGENT_MAX_ITERATIONS
         self.max_retries = settings.AGENT_MAX_RETRIES
+        self.max_llm_calls = settings.MAX_LLM_CALLS_PER_TASK
+        self.max_generate_code_calls = settings.MAX_GENERATE_CODE_CALLS
+        self.max_runtime_seconds = settings.MAX_RUNTIME_SECONDS
+        self.max_retry_per_tool = settings.MAX_RETRY_PER_TOOL
         self.client = get_client()
 
     def _get_model_name(self) -> str:
@@ -82,6 +87,10 @@ class AgentOrchestrator:
 
     async def run(self, task_description: str, state: AgentState) -> AgentState:
         """Run the agent loop until completion or max iterations."""
+        started_at = time.monotonic()
+        llm_calls = 0
+        generate_code_calls = 0
+
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": task_description},
@@ -100,7 +109,21 @@ class AgentOrchestrator:
                 current_tool=None,
             )
 
+            elapsed = time.monotonic() - started_at
+            if elapsed > self.max_runtime_seconds:
+                state.status = ProcessingStatus.FAILED
+                state.error = f"Task exceeded runtime budget ({self.max_runtime_seconds}s)."
+                self._emit_progress(state.status.value, 0, state.error, current_tool=None)
+                return state
+
+            if llm_calls >= self.max_llm_calls:
+                state.status = ProcessingStatus.FAILED
+                state.error = f"Task exceeded LLM call budget ({self.max_llm_calls})."
+                self._emit_progress(state.status.value, 0, state.error, current_tool=None)
+                return state
+
             try:
+                llm_calls += 1
                 response = await self._call_llm(messages, tool_definitions)
             except Exception as exc:
                 logger.exception("LLM call failed on iteration %d", iteration)
@@ -136,6 +159,18 @@ class AgentOrchestrator:
                     [c["name"] for c in tool_calls_info],
                 )
 
+                generate_code_calls += sum(
+                    1 for call in tool_calls_info if call["name"] == "generate_code"
+                )
+                if generate_code_calls > self.max_generate_code_calls:
+                    state.status = ProcessingStatus.FAILED
+                    state.error = (
+                        "Task exceeded generate_code call budget "
+                        f"({self.max_generate_code_calls})."
+                    )
+                    self._emit_progress(state.status.value, 0, state.error, current_tool="generate_code")
+                    return state
+
                 tool_names = ", ".join(c["name"] for c in tool_calls_info)
                 self._emit_progress(
                     self._status_for_tool(tool_calls_info[0]["name"]) if tool_calls_info else state.status.value,
@@ -144,7 +179,7 @@ class AgentOrchestrator:
                     current_tool=tool_calls_info[0]["name"] if tool_calls_info else None,
                 )
 
-                results = await self.registry.execute_parallel(tool_calls_info)
+                results = await self._execute_tool_calls_with_retries(tool_calls_info)
 
                 for result in results:
                     result_content = (
@@ -160,6 +195,16 @@ class AgentOrchestrator:
                         }
                     )
                     self._update_state_from_tool(state, result)
+
+                failed_tools = [r for r in results if not r.success]
+                if failed_tools:
+                    first_error = failed_tools[0]
+                    state.status = ProcessingStatus.FAILED
+                    state.error = (
+                        f"Tool '{first_error.name}' failed after retries: {first_error.error}"
+                    )
+                    self._emit_progress(state.status.value, 0, state.error, current_tool=first_error.name)
+                    return state
 
                 continue
 
@@ -213,6 +258,42 @@ class AgentOrchestrator:
             self._emit_progress(state.status.value, 0, state.error, current_tool=None)
 
         return state
+
+    async def _execute_tool_calls_with_retries(
+        self,
+        calls: list[dict[str, Any]],
+    ) -> list[Any]:
+        """Execute tool calls with bounded retry attempts per tool."""
+        pending = list(calls)
+        attempts: dict[str, int] = {call["tool_call_id"]: 0 for call in calls}
+        completed: dict[str, Any] = {}
+
+        while pending:
+            results = await self.registry.execute_parallel(pending)
+            next_pending: list[dict[str, Any]] = []
+
+            for call, result in zip(pending, results):
+                call_id = call["tool_call_id"]
+                if result.success:
+                    completed[call_id] = result
+                    continue
+
+                attempts[call_id] += 1
+                if attempts[call_id] <= self.max_retry_per_tool:
+                    logger.warning(
+                        "Retrying tool %s (%d/%d) due to error: %s",
+                        call["name"],
+                        attempts[call_id],
+                        self.max_retry_per_tool,
+                        result.error,
+                    )
+                    next_pending.append(call)
+                else:
+                    completed[call_id] = result
+
+            pending = next_pending
+
+        return [completed[call["tool_call_id"]] for call in calls if call["tool_call_id"] in completed]
 
     async def _call_llm(
         self,

@@ -366,3 +366,4 @@ PDF_VISION_MODEL=google/gemini-3-flash-preview
 - ✅ Runtime check: backend launched from venv and `/health` returned registered tool list
 - ✅ Phase 1 Step 1: model routing defaults updated to MiniMax 2.5 for orchestration, planning, and code generation (`ORCHESTRATION_MODEL`, `PLANNING_MODEL`, `CODEGEN_MODEL`)
 - ✅ Phase 1 Step 2: notebook complexity caps added (`MAX_NOTEBOOK_CELLS`, `MAX_NOTEBOOK_CODE_CELLS`) with merged summary markdown cell for overflow low-priority sections
+- ✅ Phase 1 Step 3: orchestrator budget guards added (`MAX_LLM_CALLS_PER_TASK`, `MAX_GENERATE_CODE_CALLS`, `MAX_RUNTIME_SECONDS`, `MAX_RETRY_PER_TOOL`) with explicit fail-fast status messages

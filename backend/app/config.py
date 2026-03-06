@@ -56,6 +56,10 @@ class Settings(BaseSettings):
     AGENT_MAX_ITERATIONS: int = 15
     AGENT_MAX_RETRIES: int = 3
     AGENT_TOOL_TIMEOUT: int = 120  # seconds per tool execution
+    MAX_LLM_CALLS_PER_TASK: int = 20
+    MAX_GENERATE_CODE_CALLS: int = 8
+    MAX_RUNTIME_SECONDS: int = 240
+    MAX_RETRY_PER_TOOL: int = 2
 
     # PDF Parser Configuration
     PDF_PARSER_PRIMARY: str = "gemini_vision"     # "gemini_vision" or "pymupdf"
