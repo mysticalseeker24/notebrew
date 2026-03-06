@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     # OpenRouter Configuration
     OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
     GEMINI_3_FLASH_MODEL: str = "google/gemini-3-flash-preview"
-    MINIMAX_M25_MODEL: str = "minimaxai/minimax-m2.5"
+    MINIMAX_M25_MODEL: str = "minimax/minimax-m2.5"
 
     # Server Configuration
     HOST: str = "0.0.0.0"

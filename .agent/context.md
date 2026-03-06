@@ -370,3 +370,4 @@ PDF_VISION_MODEL=google/gemini-3-flash-preview
 - ✅ Phase 1 Step 4: deterministic orchestrator fanout added after planning (`generate_code` in parallel, bounded retries, code validation, then direct notebook assembly)
 - ✅ Phase 1 Step 5: chunked PDF processing added for long documents (concurrent Gemini chunk extraction with merged sections/equations/references)
 - ✅ Phase 1 Step 6: notebook quality prompts upgraded for interactivity and learning effectiveness (interactive experiment cells, learner checkpoints, compact tweakable config patterns)
+- ✅ OpenRouter MiniMax model path corrected to `minimax/minimax-m2.5` (replaces invalid `minimaxai/minimax-m2.5`)
