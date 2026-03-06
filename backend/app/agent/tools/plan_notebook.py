@@ -116,7 +116,102 @@ async def plan_notebook(paper_data: dict[str, Any]) -> dict[str, Any]:
         logger.warning("Failed to parse notebook plan JSON, using fallback")
         plan = _fallback_plan(metadata, sections)
 
+    plan = _apply_plan_limits(plan)
+
     logger.info("Notebook plan: %d cells", len(plan.get("cells", [])))
+    return plan
+
+
+def _is_low_value_section(section_ref: str, purpose: str) -> bool:
+    """Heuristic for sections that can be merged into summaries."""
+    text = f"{section_ref} {purpose}".lower()
+    low_value_tokens = (
+        "related work",
+        "background",
+        "appendix",
+        "supplementary",
+        "limitations",
+        "future work",
+    )
+    return any(token in text for token in low_value_tokens)
+
+
+def _apply_plan_limits(plan: dict[str, Any]) -> dict[str, Any]:
+    """Cap notebook size and merge overflow into one markdown summary."""
+    cells = plan.get("cells") or []
+    if not isinstance(cells, list):
+        plan["cells"] = []
+        return plan
+
+    max_cells = max(4, settings.MAX_NOTEBOOK_CELLS)
+    max_code_cells = max(2, settings.MAX_NOTEBOOK_CODE_CELLS)
+
+    limited: list[dict[str, Any]] = []
+    dropped_sections: list[str] = []
+    code_count = 0
+
+    for cell in cells:
+        if not isinstance(cell, dict):
+            continue
+
+        cell_type = str(cell.get("cell_type", "markdown")).lower()
+        purpose = str(cell.get("purpose", "")).strip()
+        section_ref = str(cell.get("section_ref") or "").strip()
+
+        if cell_type == "code":
+            if code_count >= max_code_cells:
+                if section_ref:
+                    dropped_sections.append(section_ref)
+                continue
+            code_count += 1
+
+        if len(limited) >= max_cells:
+            if section_ref:
+                dropped_sections.append(section_ref)
+            continue
+
+        limited.append(cell)
+
+    if len(limited) < len(cells):
+        for cell in cells:
+            if not isinstance(cell, dict):
+                continue
+            if cell in limited:
+                continue
+            section_ref = str(cell.get("section_ref") or "").strip()
+            purpose = str(cell.get("purpose", "")).strip()
+            if section_ref and _is_low_value_section(section_ref, purpose):
+                dropped_sections.append(section_ref)
+
+    unique_dropped: list[str] = []
+    for section in dropped_sections:
+        if section and section not in unique_dropped:
+            unique_dropped.append(section)
+
+    if unique_dropped:
+        summary_cell = {
+            "cell_type": "markdown",
+            "purpose": (
+                "Condensed summary for lower-priority sections merged to keep the "
+                f"notebook concise: {', '.join(unique_dropped[:8])}"
+            ),
+            "section_ref": None,
+        }
+
+        if len(limited) < max_cells:
+            limited.append(summary_cell)
+        else:
+            replace_idx = next(
+                (i for i in range(len(limited) - 1, -1, -1)
+                 if str(limited[i].get("cell_type", "markdown")).lower() == "markdown"),
+                len(limited) - 1,
+            )
+            limited[replace_idx] = summary_cell
+
+    if not limited:
+        limited = _fallback_plan({}, []).get("cells", [])[:max_cells]
+
+    plan["cells"] = limited
     return plan
 
 

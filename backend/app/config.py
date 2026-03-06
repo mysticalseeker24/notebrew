@@ -63,6 +63,10 @@ class Settings(BaseSettings):
     PDF_MAX_SIZE_MB: int = 20                     # max PDF size for Gemini vision
     PDF_VISION_MODEL: str = "google/gemini-3-flash-preview"  # model for PDF parsing
 
+    # Notebook planning limits (Phase 1 speed controls)
+    MAX_NOTEBOOK_CELLS: int = 12
+    MAX_NOTEBOOK_CODE_CELLS: int = 6
+
     # Notebook launch links and hosting
     PUBLIC_NOTEBOOK_BASE_URL: str = ""
     COLAB_URL_TEMPLATE: str = "https://colab.research.google.com/#fileId={notebook_url}"

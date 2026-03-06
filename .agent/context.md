@@ -365,3 +365,4 @@ PDF_VISION_MODEL=google/gemini-3-flash-preview
 - ✅ Backend validation should be run with `backend/venv` Python (`.\\venv\\Scripts\\python.exe` on Windows)
 - ✅ Runtime check: backend launched from venv and `/health` returned registered tool list
 - ✅ Phase 1 Step 1: model routing defaults updated to MiniMax 2.5 for orchestration, planning, and code generation (`ORCHESTRATION_MODEL`, `PLANNING_MODEL`, `CODEGEN_MODEL`)
+- ✅ Phase 1 Step 2: notebook complexity caps added (`MAX_NOTEBOOK_CELLS`, `MAX_NOTEBOOK_CODE_CELLS`) with merged summary markdown cell for overflow low-priority sections
